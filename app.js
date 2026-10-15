@@ -416,6 +416,7 @@ function coinFx(x, y, amt, big) {
   const h = coinHeat(amt, big), maxN = isMobile() ? 24 : 36;
   const N = reduceMotion() ? 5 : h > 0 ? Math.round(12 + (maxN - 12) * h) : Math.round(Math.min(14, 8 + amt / 25));
   run.n = N; run.heat = h; clinkSfx(true); burstSfx(big || h > .5);
+  clearTimeout(toast._t); $('#toast').classList.remove('show'); // a new burst replaces the last result toast so it never covers the coins
   setTimeout(() => { if (coinRun === run) { finishCoinRun(); renderHud(); } }, 5000); // safety net (e.g. tab hidden, rAF paused)
   if (reduceMotion()) { // simple version: no explosion, coins glide straight to the meter
     const [gx, gy] = coinTarget();
