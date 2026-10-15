@@ -234,7 +234,7 @@ body.classic .sheet h3{color:var(--gold)}
 html,body{cursor:url(cursors/arrow.png) 1 1,auto;cursor:-webkit-image-set(url(cursors/arrow.png) 1x,url(cursors/arrow@2x.png) 2x) 1 1,auto;cursor:image-set(url(cursors/arrow.png) 1x,url(cursors/arrow@2x.png) 2x) 1 1,auto}
 a,button,.px,.chip,.node,.req,.row,[data-open],[data-a],[data-m],label,select,summary{cursor:url(cursors/pointer.png) 11 1,pointer;cursor:-webkit-image-set(url(cursors/pointer.png) 1x,url(cursors/pointer@2x.png) 2x) 11 1,pointer;cursor:image-set(url(cursors/pointer.png) 1x,url(cursors/pointer@2x.png) 2x) 11 1,pointer}
 input[type=text],input[type=search],input[type=number],textarea{cursor:text}
-#viewport{cursor:url(cursors/grab.png) 15 15,grab;cursor:-webkit-image-set(url(cursors/grab.png) 1x,url(cursors/grab@2x.png) 2x) 15 15,grab;cursor:image-set(url(cursors/grab.png) 1x,url(cursors/grab@2x.png) 2x) 15 15,grab}
+#viewport{cursor:url(cursors/arrow.png) 1 1,auto;cursor:-webkit-image-set(url(cursors/arrow.png) 1x,url(cursors/arrow@2x.png) 2x) 1 1,auto;cursor:image-set(url(cursors/arrow.png) 1x,url(cursors/arrow@2x.png) 2x) 1 1,auto}
 #viewport .node{cursor:url(cursors/pointer.png) 11 1,pointer;cursor:-webkit-image-set(url(cursors/pointer.png) 1x,url(cursors/pointer@2x.png) 2x) 11 1,pointer;cursor:image-set(url(cursors/pointer.png) 1x,url(cursors/pointer@2x.png) 2x) 11 1,pointer}
 #viewport.drag,#viewport.drag *{cursor:url(cursors/grabbing.png) 15 15,grabbing;cursor:-webkit-image-set(url(cursors/grabbing.png) 1x,url(cursors/grabbing@2x.png) 2x) 15 15,grabbing;cursor:image-set(url(cursors/grabbing.png) 1x,url(cursors/grabbing@2x.png) 2x) 15 15,grabbing}
 #btn-music.off{opacity:.55;text-decoration:line-through}

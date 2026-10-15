@@ -91,7 +91,7 @@ function loadBufs() {
 function play(k, vol, rate = 1, at = 0) {
   const a = audio(); if (!a || !BUF[k]) return false;
   const t = a.currentTime + at, s = a.createBufferSource(), g = a.createGain(); s.buffer = BUF[k]; s.playbackRate.value = rate; g.gain.value = vol;
-  s.connect(g).connect(sfxBus); s.start(t); window.__sndlog.push({ k, t: performance.now() + at * 1000, rate }); return true;
+  s.connect(g).connect(sfxBus); s.start(t); window.__sndlog.push({ k, t: performance.now() + at * 1000, rate, vol }); return true;
 }
 function startMusic() {
   if (!ac || !S.music || musicSrc || !BUF.music || ac.state !== 'running') return;
@@ -104,7 +104,7 @@ function stopMusic() {
   musicBus.gain.cancelScheduledValues(t); musicBus.gain.setValueAtTime(musicBus.gain.value, t); musicBus.gain.linearRampToValueAtTime(0, t + .6); s.stop(t + .7);
 }
 function duck() { // dip the music under a coin burst, then ease back
-  if (!ac || !musicSrc) return; const t = ac.currentTime, g = duckG.gain;
+  if (!ac || !musicSrc) return; const t = ac.currentTime, g = duckG.gain; window.__sndlog.push({ k: 'duck', t: performance.now() });
   g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(.45, t + .06); g.setTargetAtTime(1, t + .9, .35);
 }
 // Browsers block audio until a gesture: unlock on the first tap/click/key anywhere (a tap on a tile counts).
