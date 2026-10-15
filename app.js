@@ -31,7 +31,7 @@ const EFFECTS = {
 };
 
 let S = load();
-function fresh() { return { gold: 0, unlocked: { 'founder-mode': 1 }, done: {}, credit: {}, runway: 6, swings: { week: weekKey(), active: [] }, filter: Object.keys(ARCS), sound: true, sv: 2, onboarded: false, harvest: today(), theme: 'meadow' }; }
+function fresh() { return { gold: 0, unlocked: { 'founder-mode': 1 }, done: {}, credit: {}, runway: 6, swings: { week: weekKey(), active: [] }, filter: Object.keys(ARCS), sound: true, music: true, sv: 2, onboarded: false, harvest: today(), theme: 'meadow' }; }
 function load() { try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.unlocked && s.done) { const o = Object.assign(fresh(), s); if (s.sv !== 2) { o.sound = true; o.sv = 2; o._migrated = 1; } return o; } } catch (e) {} return fresh(); }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
 if (S.swings.week !== weekKey()) S.swings = { week: weekKey(), active: [] };
@@ -63,43 +63,82 @@ function nextBest() {
 }
 (function harvest() { const days = Math.min(7, Math.floor((Date.parse(today()) - Date.parse(S.harvest || today())) / 864e5)); const per = activeFx().reduce((a, e) => a + (e.daily || 0), 0); if (days > 0 && per) { S.gold += days * per; setTimeout(() => toast(`Evergreen content paid out: +${COIN}${days * per}`), 900); } S.harvest = today(); save(); })();
 
-// ---------- sound (8-bit WebAudio; context starts on the first user gesture) ----------
-let ac = null, noiseBuf = null;
-function audio() {
-  if (!S.sound) return null;
+// ---------- sound (WebAudio; the context starts on the first user gesture) ----------
+// Samples in audio/ were generated with ElevenLabs (sound effects + music) and tuned to C major.
+// If a file fails to load or decode, the old procedural 8-bit sounds play instead.
+let ac = null, noiseBuf = null, sfxBus = null, musicBus = null, duckG = null, musicSrc = null, bufsLoading = false;
+const BUF = {}, AUD_V = '4.1', MUSIC_LOOP = { start: .3, len: 47.99274 }, MUSIC_VOL = .32;
+const canOgg = (() => { try { return !!document.createElement('audio').canPlayType('audio/ogg; codecs="vorbis"'); } catch (e) { return false; } })();
+window.__sndlog = [];
+function ctx() {
+  if (!S.sound && !S.music) return null;
   try {
-    if (!ac) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; ac = new AC(); }
-    if (ac.state === 'suspended') ac.resume();
+    if (!ac) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; ac = new AC();
+      sfxBus = ac.createGain(); sfxBus.gain.value = .8; sfxBus.connect(ac.destination);
+      musicBus = ac.createGain(); musicBus.gain.value = 0; duckG = ac.createGain(); musicBus.connect(duckG).connect(ac.destination); loadBufs(); }
+    if (ac.state === 'suspended' && !document.hidden) ac.resume().then(startMusic, () => {});
     return ac;
   } catch (e) { return null; }
 }
+function audio() { return S.sound ? ctx() : null; }
+function loadBufs() {
+  if (bufsLoading) return; bufsLoading = true;
+  for (const k of ['spill', 'coin', 'kaching', 'swoosh', 'fanfare', 'error', 'click', 'music'])
+    fetch(`audio/${k}.${canOgg ? 'ogg' : 'mp3'}?v=${AUD_V}`).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+      .then(b => new Promise((res, rej) => ac.decodeAudioData(b, res, rej))).then(buf => { BUF[k] = buf; if (k === 'music') startMusic(); })
+      .catch(() => { BUF[k] = null; }); // fall back to procedural sound
+}
+function play(k, vol, rate = 1, at = 0) {
+  const a = audio(); if (!a || !BUF[k]) return false;
+  const t = a.currentTime + at, s = a.createBufferSource(), g = a.createGain(); s.buffer = BUF[k]; s.playbackRate.value = rate; g.gain.value = vol;
+  s.connect(g).connect(sfxBus); s.start(t); window.__sndlog.push({ k, t: performance.now() + at * 1000, rate }); return true;
+}
+function startMusic() {
+  if (!ac || !S.music || musicSrc || !BUF.music || ac.state !== 'running') return;
+  const s = ac.createBufferSource(), t = ac.currentTime; s.buffer = BUF.music; s.loop = true; s.loopStart = MUSIC_LOOP.start; s.loopEnd = MUSIC_LOOP.start + MUSIC_LOOP.len;
+  s.connect(musicBus); s.start(t + .05, MUSIC_LOOP.start); musicSrc = s; window.__sndlog.push({ k: 'music', t: performance.now() + 50 });
+  musicBus.gain.cancelScheduledValues(t); musicBus.gain.setValueAtTime(0, t); musicBus.gain.linearRampToValueAtTime(MUSIC_VOL, t + 2); // 2 s fade-in
+}
+function stopMusic() {
+  if (!musicSrc) return; const s = musicSrc, t = ac.currentTime; musicSrc = null;
+  musicBus.gain.cancelScheduledValues(t); musicBus.gain.setValueAtTime(musicBus.gain.value, t); musicBus.gain.linearRampToValueAtTime(0, t + .6); s.stop(t + .7);
+}
+function duck() { // dip the music under a coin burst, then ease back
+  if (!ac || !musicSrc) return; const t = ac.currentTime, g = duckG.gain;
+  g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(.45, t + .06); g.setTargetAtTime(1, t + .9, .35);
+}
 // Browsers block audio until a gesture: unlock on the first tap/click/key anywhere (a tap on a tile counts).
-const unlockAudio = () => { const a = audio(); if (a && a.state !== 'running') a.resume(); };
+const unlockAudio = () => { ctx(); };
 ['pointerdown', 'touchend', 'keydown'].forEach(ev => window.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
+document.addEventListener('visibilitychange', () => { if (!ac) return; if (document.hidden) ac.suspend(); else if (S.sound || S.music) ac.resume().then(startMusic, () => {}); });
 function tone(f, d, type = 'square', vol = .06, at = 0, f2) {
   const a = audio(); if (!a) return; const t = a.currentTime + at, o = a.createOscillator(), g = a.createGain();
   o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0008, t + d);
-  o.connect(g).connect(a.destination); o.start(t); o.stop(t + d + .02);
+  o.connect(g).connect(sfxBus); o.start(t); o.stop(t + d + .02);
 }
 function noise(d, vol = .12, at = 0, hp = 900) {
   const a = audio(); if (!a) return; const t = a.currentTime + at;
   if (!noiseBuf) { noiseBuf = a.createBuffer(1, a.sampleRate * .5, a.sampleRate); const ch = noiseBuf.getChannelData(0); let last = 0; for (let i = 0; i < ch.length; i++) { if (i % 3 === 0) last = Math.random() * 2 - 1; ch[i] = last; } } // sample-and-hold = crunchy 8-bit noise
   const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain(); src.buffer = noiseBuf; f.type = 'highpass'; f.frequency.value = hp;
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0008, t + d); src.connect(f).connect(g).connect(a.destination); src.start(t); src.stop(t + d + .02);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0008, t + d); src.connect(f).connect(g).connect(sfxBus); src.start(t); src.stop(t + d + .02);
 }
-function beep(seq) { if (!S.sound) return; let at = 0; for (const [f, d, type] of seq) { tone(f, d, type || 'square', .06, at); at += d * .8; } }
 const SFX = { cut: [[220, .05, 'sawtooth'], [440, .06], [660, .08]], coin: [[988, .06], [1319, .14]], boss: [[523, .1], [659, .1], [784, .1], [1047, .3]], nope: [[160, .15, 'sawtooth']], tap: [[700, .03]] };
-function burstSfx(big) { noise(big ? .28 : .16, big ? .16 : .11); tone(big ? 520 : 680, big ? .2 : .12, 'square', .07, 0, 90); if (big) tone(260, .25, 'triangle', .08, .02, 60); }
-// coin clink: two quick square blips, pitch climbs a pentatonic step per coin; rate-limited so a swarm doesn't get noisy
+const SAMPLE = new Map([[SFX.tap, ['click', .35]], [SFX.cut, ['swoosh', .7]], [SFX.boss, ['fanfare', .5]], [SFX.nope, ['error', .4]], [SFX.coin, ['coin', .35]]]);
+function beep(seq) { if (!S.sound) return; const sm = SAMPLE.get(seq); if (sm && play(sm[0], sm[1])) return; let at = 0; for (const [f, d, type] of seq) { tone(f, d, type || 'square', .06, at); at += d * .8; } }
+function burstSfx(big) { duck(); if (play('spill', big ? .9 : .75)) return; noise(big ? .28 : .16, big ? .16 : .11); tone(big ? 520 : 680, big ? .2 : .12, 'square', .07, 0, 90); if (big) tone(260, .25, 'triangle', .08, .02, 60); }
+// coin landing: a short C note that climbs the C-major pentatonic per coin (C6 up to C7); rate-limited so a swarm doesn't get noisy
 const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31];
 let lastClink = 0, clinkStep = 0;
 function clinkSfx(reset) {
   if (reset) { clinkStep = 0; return; }
   const now = performance.now(), slot = Math.max(now, lastClink + 48); if (slot - now > 260) return; lastClink = slot; // queue into 48ms slots; drop only if far behind
-  const f = 1046.5 * Math.pow(2, PENTA[Math.min(clinkStep++, PENTA.length - 1)] / 12), at = (slot - now) / 1000;
+  const st = PENTA[Math.min(clinkStep++, 5)], at = (slot - now) / 1000;
+  if (play('coin', .26, .5 * Math.pow(2, st / 12), at)) return;
+  const f = 1046.5 * Math.pow(2, PENTA[Math.min(clinkStep - 1, PENTA.length - 1)] / 12);
   tone(f, .05, 'square', .045, at); tone(f * 1.5, .09, 'square', .03, at + .035);
 }
+function kachingSfx() { if (!play('kaching', .4, 1, .04)) { tone(1046.5, .08, 'square', .05, .04); tone(1568, .18, 'square', .04, .1); } }
 
 // ---------- tree ----------
 const vp = $('#viewport'), world = $('#world'), nodesEl = $('#nodes'), svg = $('#vines');
@@ -182,6 +221,7 @@ function renderHud() {
   $('#swings').textContent = '■'.repeat(Math.min(used, mx)) + '□'.repeat(Math.max(0, mx - used));
   $('#depth').textContent = Object.keys(S.done).length + '/' + SKILLS.length;
   $('#btn-sound').textContent = S.sound ? '🔊' : '🔇';
+  const mb = $('#btn-music'); mb.classList.toggle('off', !S.music); mb.title = S.music ? 'Music: on (tap to turn off)' : 'Music: off (tap to turn on)'; mb.setAttribute('aria-pressed', S.music ? 'true' : 'false');
   $('#btn-theme').textContent = S.theme === 'classic' ? '☾' : '☀';
 }
 
@@ -274,8 +314,9 @@ $('#btn-week').onclick = () => {
    <h3>READY TO UNLOCK</h3>${av.length ? av.map(row).join('') : '<p class="empty">Clear more chapters to open new ones.</p>'}`);
 };
 $('#drawer').addEventListener('click', e => { const t = e.target.closest('[data-open]'); if (t) { openNode(t.dataset.open); focusNode(byId[t.dataset.open]); } });
-$('#btn-reset').onclick = () => { if (confirm('Start over? This clears all your progress.')) { finishCoinRun(); const keep = { sound: S.sound, theme: S.theme }; S = Object.assign(fresh(), keep, { onboarded: true }); shownGold = 0; save(); sel = null; $('#panel').classList.add('hidden'); $('#drawer').classList.add('hidden'); $('#search').value = ''; $('#runway').value = S.runway; renderFilters(); renderTree(); fit(); toast('Fresh field. Good luck!'); } };
+$('#btn-reset').onclick = () => { if (confirm('Start over? This clears all your progress.')) { finishCoinRun(); const keep = { sound: S.sound, music: S.music, theme: S.theme }; S = Object.assign(fresh(), keep, { onboarded: true }); shownGold = 0; save(); sel = null; $('#panel').classList.add('hidden'); $('#drawer').classList.add('hidden'); $('#search').value = ''; $('#runway').value = S.runway; renderFilters(); renderTree(); fit(); toast('Fresh field. Good luck!'); } };
 $('#btn-sound').onclick = () => { S.sound = !S.sound; save(); renderHud(); beep(SFX.coin); };
+$('#btn-music').onclick = () => { S.music = !S.music; save(); renderHud(); if (S.music) { const a = ctx(); if (a) a.resume().then(startMusic, () => {}); toast('♪ Music on'); } else { stopMusic(); toast('Music off'); } };
 $('#btn-theme').onclick = () => { S.theme = S.theme === 'classic' ? 'meadow' : 'classic'; document.body.className = S.theme; save(); renderHud(); setTop(); toast(S.theme === 'classic' ? 'Classic (dark) theme' : 'Meadow (day) theme'); };
 $('#btn-menu').onclick = () => { $('#top').classList.toggle('open'); setTop(); };
 $('#btn-help').onclick = () => intro(0);
@@ -342,7 +383,7 @@ function coinLand(run) {
   $('#gold').textContent = v;
   const pill = $('#coinpill'); pill.classList.remove('hit'); void pill.offsetWidth; pill.classList.add('hit');
   clinkSfx();
-  if (run.landed >= run.n) { shownGold = run.to; coinRun = null; pill.classList.remove('pop'); void pill.offsetWidth; pill.classList.add('pop'); renderHud(); }
+  if (run.landed >= run.n) { kachingSfx(); shownGold = run.to; coinRun = null; pill.classList.remove('pop'); void pill.offsetWidth; pill.classList.add('pop'); renderHud(); }
 }
 function coinFx(x, y, amt, big) {
   const run = coinRun || { from: S.gold - amt, to: S.gold, n: 0, landed: 0 }; coinRun = run;
@@ -421,5 +462,5 @@ function intro(i) {
 $('.title').innerHTML = iconSVG('scythe', 26) + '<span>OVERGROWTH<small>the solo founder skill tree</small></span>';
 setTop(); renderFilters(); renderTree(); home();
 if (!S.onboarded) intro(0);
-window.__og = { get audio() { return ac ? ac.state : 'none'; }, get coinRun() { return coinRun; }, get state() { return S; }, status: id => status(byId[id]), open: id => { openNode(id); focusNode(byId[id]); } };
+window.__og = { get audio() { return ac ? ac.state : 'none'; }, get music() { return !!musicSrc; }, get bufs() { return Object.fromEntries(Object.entries(BUF).map(([k, v]) => [k, v ? +v.duration.toFixed(3) : null])); }, get coinRun() { return coinRun; }, get state() { return S; }, status: id => status(byId[id]), open: id => { openNode(id); focusNode(byId[id]); } };
 })();

@@ -18,3 +18,8 @@ Live: https://cookiebubba.github.io/overgrowth-handbook/
 - `node tools/validate-graph.js`: checks for cycles, unreachable chapters, redundant or dominated requirements, silly gates, and the minimum path to each milestone
 - `node tools/layout.js`: regenerates the tree layout after you edit the data
 - `node tools/logic-md.js`: prints the dependency table used in LOGIC.md
+
+## Sound and cursors (v4.1)
+- `audio/`: music loop and sound effects generated with ElevenLabs (Music + Sound Effects APIs) from prompts in one shared style ("soft retro 8-bit chiptune, warm, cozy, NES-style"), then trimmed, filtered, tuned to C major and loudness-matched. OGG with MP3 fallback, loaded via WebAudio `decodeAudioData`; the procedural 8-bit sounds remain as a fallback.
+- Music: 48 s seamless loop (16 bars at 80 BPM), fades in over 2 s after the first tap, ducks under coin bursts, pauses when the tab is hidden, separate ♪ toggle (saved, on by default).
+- `cursors/`: pixel arrow / pointing hand / grab / grabbing, 32 px plus 64 px for 2x screens.
