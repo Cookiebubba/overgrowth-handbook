@@ -1,48 +1,55 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#5ec8ff">
+<meta name="theme-color" content="#4cb8f5">
 <title>OVERGROWTH: Solo Founder Skill Tree</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css">
-</head><body>
+<link rel="stylesheet" href="styles.css?v=3">
+</head><body class="meadow">
 <header id="top">
   <div id="hud">
-    <div class="title">🌾 OVERGROWTH<small>solo founder skill tree</small></div>
-    <div class="stat" title="Gold: earned by completing chapters"><span class="lbl">GOLD</span><span id="gold" class="coin">0</span></div>
-    <div class="stat meter" title="Oxygen = runway in months (tap the number to edit)"><span class="lbl">O₂</span>
-      <div class="bar o2"><i id="o2bar"></i></div><input id="runway" type="number" inputmode="numeric" min="0" max="60" aria-label="Runway months"><span class="lbl">MO</span></div>
-    <div class="stat meter" title="Launch Readiness: filled by LAUNCH GATE chapters"><span class="lbl">LAUNCH</span>
-      <div class="bar gold"><i id="readybar"></i></div><span id="readypct" class="num">0%</span></div>
-    <div class="stat hide-sm" title="Weekly focus swings"><span class="lbl">SWINGS</span><span id="swings"></span></div>
-    <div class="stat hide-sm"><span class="lbl">CUT</span><span id="depth" class="num">0/0</span></div>
-    <button id="btn-sound" class="px icon" aria-label="Toggle sound">🔇</button>
+    <div class="title">🌾 OVERGROWTH<small>the solo founder skill tree</small></div>
+    <div class="stat meter" title="Oxygen = how many months of money you have left. Tap the number to change it."><span class="lbl">RUNWAY</span>
+      <div class="bar o2"><i id="o2bar"></i></div><input id="runway" type="number" inputmode="numeric" min="0" max="60" aria-label="Runway in months"><span class="lbl">MO</span></div>
+    <div class="stat meter" title="How close you are to being allowed to launch: fills as you clear the launch essentials."><span class="lbl">LAUNCH</span>
+      <div class="bar gold"><i id="readybar"></i></div><span id="readypct" class="num">0/4</span></div>
+    <div class="stat hide-sm" title="Weekly focus slots"><span class="lbl">THIS WEEK</span><span id="swings"></span></div>
+    <div class="stat hide-sm"><span class="lbl">CLEARED</span><span id="depth" class="num">0/0</span></div>
+    <button id="btn-theme" class="px icon" aria-label="Switch theme" title="Switch theme: Meadow / Classic">☀</button>
+    <button id="btn-sound" class="px icon" aria-label="Toggle sound" title="Sound">🔇</button>
     <button id="btn-menu" class="px icon" aria-label="Menu">☰</button>
   </div>
   <div id="toolbar">
-    <input id="search" type="search" placeholder="Search chapters…" aria-label="Search">
+    <input id="search" type="search" placeholder="Search chapters…" aria-label="Search chapters">
     <div id="arcfilters"></div>
     <div class="tools">
-      <button id="btn-buffs" class="px">BUFFS</button>
+      <button id="btn-buffs" class="px">BONUSES</button>
       <button id="btn-week" class="px">THIS WEEK</button>
-      <button id="btn-fit" class="px">FIT</button>
-      <button id="btn-help" class="px">?</button>
-      <button id="btn-reset" class="px danger">RESET</button>
+      <button id="btn-fit" class="px">SHOW ALL</button>
+      <button id="btn-help" class="px">HOW TO PLAY</button>
+      <button id="btn-reset" class="px danger">START OVER</button>
     </div>
   </div>
 </header>
 <main id="viewport">
-  <div class="sky"><div class="sun"></div><div class="cloud c1"></div><div class="cloud c2"></div><div class="cloud c3"></div></div>
+  <div class="skystrip"><div class="sun"></div><div class="cloud c1"></div><div class="cloud c2"></div><div class="cloud c3"></div></div><div class="grassstrip"></div>
   <div id="world"><svg id="vines"></svg><div id="nodes"></div></div>
+  <div id="coinpill"><span class="pc"></span><span id="gold">0</span></div>
   <button id="next" class="px nextbtn"></button>
-  <div id="legend"><span><b class="lg done"></b>cut</span><span><b class="lg unlocked"></b>open</span><span><b class="lg avail"></b>ready</span><span><b class="lg locked"></b>overgrown</span></div>
+  <div id="legend">
+    <span><b class="lg ok"></b>can unlock</span><span><b class="lg no"></b>locked</span><span><b class="lg done"></b>cleared</span>
+    <span><i class="vl hard"></i>thorny vine = required</span><span><i class="vl any"></i>yellow vine = any one is enough</span>
+  </div>
+  <div id="tip" class="hidden"></div>
 </main>
 <aside id="panel" class="sheet hidden" aria-live="polite"><div class="grab"></div><button id="close" class="px closebtn" aria-label="Close">✕</button><div id="panel-body"></div></aside>
 <aside id="drawer" class="sheet left hidden"><div class="grab"></div><button id="dclose" class="px closebtn" aria-label="Close">✕</button><div id="drawer-body"></div></aside>
 <div id="modal" class="hidden"></div>
 <div id="fxlayer"></div>
 <div id="toast"></div>
-<script src="skills-data.js"></script>
-<script src="app.js"></script>
+<script src="icons.js?v=3"></script>
+<script src="skills-data.js?v=3"></script>
+<script src="layout.js?v=3"></script>
+<script src="app.js?v=3"></script>
 </body></html>

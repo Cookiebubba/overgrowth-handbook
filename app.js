@@ -1,175 +1,215 @@
 (() => {
 'use strict';
-const CW = 150, RH = 124, PAD = 150;
-const KEY = 'overgrowth-v2';
+const KEY = 'overgrowth-v3';
 const byId = Object.fromEntries(SKILLS.map(s => [s.id, s]));
 const $ = s => document.querySelector(s);
 const isMobile = () => matchMedia('(max-width:760px)').matches;
-const weekKey = () => { const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d.toISOString().slice(0, 10); };
+const weekKey = () => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d.toISOString().slice(0, 10); };
 const today = () => new Date().toISOString().slice(0, 10);
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+const deps = n => [...n.all, ...n.any.flat()];
+const COIN = '<i class="ci"></i>';
 
-// Mechanical buff effects (everything else in `mods` is labeled as a real-world perk, not simulated)
+// Mechanical bonus effects. Every other "grants" line is labeled a real-world perk (not simulated).
 const EFFECTS = {
-  'founder-mode':        { swings: 1, txt: '+1 weekly swing charge' },
-  'first-contractor':    { swings: 1, txt: '+1 weekly swing charge' },
-  'runway-consult':      { runway: 6, arc: { discover: 1.5 }, txt: '+6 mo O₂; Discover gold ×1.5' },
-  'boss-term-sheet':     { runway: 18, txt: '+18 mo O₂' },
-  'runway-dayjob':       { noDrain: true, txt: 'O₂ never drains' },
-  'boss-ramen':          { noDrain: true, txt: 'O₂ never drains' },
-  'ship-weekly':         { arc: { build: 1.1 }, txt: 'Build gold ×1.1' },
-  'payments':            { all: 1.25, txt: 'All gold ×1.25' },
-  'productized':         { all: 1.2, txt: 'All gold ×1.2' },
+  'founder-mode': { swings: 1, txt: '+1 weekly focus slot' },
+  'first-contractor': { swings: 1, txt: '+1 weekly focus slot' },
+  'runway-consult': { runway: 6, arc: { discover: 1.5 }, txt: '+6 months runway; Discover gold ×1.5' },
+  'boss-term-sheet': { runway: 18, txt: '+18 months runway' },
+  'runway-dayjob': { noDrain: true, txt: 'Runway never runs out' },
+  'boss-ramen': { noDrain: true, txt: 'Runway never runs out' },
+  'ship-weekly': { arc: { build: 1.1 }, txt: 'Build gold ×1.1' },
+  'payments': { all: 1.25, txt: 'All gold ×1.25' },
+  'productized': { all: 1.2, txt: 'All gold ×1.2' },
   'boss-first-customer': { arc: { grow: 1.5 }, txt: 'Grow gold ×1.5' },
-  'cold-outbound':       { arc: { grow: 1.3 }, txt: 'Grow gold ×1.3' },
-  'pricing':             { arc: { scale: 1.5 }, txt: 'Scale gold ×1.5' },
-  'path-venture':        { arc: { scale: 2 }, drainX: 2, txt: 'Scale gold ×2, but runway shown at half' },
-  'product-hunt':        { bonus: 300, txt: 'One-time +300 gold on completion' },
-  'ch-youtube':          { daily: 5, txt: '+5 gold per day (up to 7 days banked)' },
-  'seo-content':         { daily: 5, txt: '+5 gold per day (up to 7 days banked)' },
+  'cold-outbound': { arc: { grow: 1.3 }, txt: 'Grow gold ×1.3' },
+  'pricing': { arc: { scale: 1.5 }, txt: 'Scale gold ×1.5' },
+  'path-venture': { arc: { scale: 2 }, drainX: 2, txt: 'Scale gold ×2, but runway counts half (you burn faster)' },
+  'product-hunt': { bonus: 300, txt: 'One-time +300 gold when cleared' },
+  'ch-youtube': { daily: 5, txt: '+5 gold per day (up to 7 days saved up)' },
+  'seo-content': { daily: 5, txt: '+5 gold per day (up to 7 days saved up)' },
 };
 
 let S = load();
-function fresh() { return { gold: 0, unlocked: { 'founder-mode': 1 }, done: {}, runway: 6, swings: { week: weekKey(), active: [] }, filter: Object.keys(ARCS), sound: false, onboarded: false, harvest: today() }; }
+function fresh() { return { gold: 0, unlocked: { 'founder-mode': 1 }, done: {}, credit: {}, runway: 6, swings: { week: weekKey(), active: [] }, filter: Object.keys(ARCS), sound: false, onboarded: false, harvest: today(), theme: 'meadow' }; }
 function load() { try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.unlocked && s.done) return Object.assign(fresh(), s); } catch (e) {} return fresh(); }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
 if (S.swings.week !== weekKey()) S.swings = { week: weekKey(), active: [] };
+document.body.className = S.theme === 'classic' ? 'classic' : 'meadow';
 
 const activeFx = () => Object.entries(EFFECTS).filter(([id]) => S.done[id]).map(([id, e]) => ({ id, ...e }));
 const maxSwings = () => 3 + activeFx().reduce((a, e) => a + (e.swings || 0), 0);
 function goldMul(n) { let m = 1; for (const e of activeFx()) { if (e.all) m *= e.all; if (e.arc && e.arc[n.arc]) m *= e.arc[n.arc]; } return m; }
 const reward = n => Math.round(n.gold * goldMul(n));
-const reqMet = n => n.req.every(r => S.done[r]);
-const forkedAway = n => n.excl && SKILLS.some(o => o.excl === n.excl && o.id !== n.id && (S.unlocked[o.id] || S.done[o.id]));
+const reqMet = n => n.all.every(r => S.done[r]) && n.any.every(g => g.some(r => S.done[r]));
+const rivals = n => n.excl ? SKILLS.filter(o => o.excl === n.excl && o.id !== n.id) : [];
+const forkedAway = n => rivals(n).some(o => S.unlocked[o.id] || S.done[o.id]);
 function status(n) { if (S.done[n.id]) return 'done'; if (S.unlocked[n.id]) return 'unlocked'; if (forkedAway(n)) return 'forked'; if (reqMet(n)) return 'avail'; return 'locked'; }
-function nextBest() {
-  const order = (a, b) => a.c - b.c || a.r - b.r;
-  const open = SKILLS.filter(n => status(n) === 'unlocked').sort(order);
-  if (open.length) return { n: open[0], verb: 'FINISH' };
-  const av = SKILLS.filter(n => status(n) === 'avail').sort((a, b) => (b.tier === 'root') - (a.tier === 'root') || order(a, b));
-  return av.length ? { n: av[0], verb: S.gold >= av[0].cost ? 'CUT INTO' : 'NEED GOLD FOR' } : null;
+// border color like the game: gold = you can act on it, red = locked / too expensive
+const border = (n, st) => (st === 'done' || st === 'unlocked' || (st === 'avail' && S.gold >= n.cost)) ? 'ok' : 'no';
+function missing(n) {
+  const m = []; const hard = n.all.filter(r => !S.done[r]); if (hard.length) m.push(hard.map(r => byId[r].name).join(' + '));
+  n.any.filter(g => !g.some(r => S.done[r])).forEach(g => m.push('one of: ' + g.map(r => byId[r].name).join(' / ')));
+  return m;
 }
+function nextBest() {
+  const ord = (a, b) => (LAYOUT.depth?.[a.id] || 0) - (LAYOUT.depth?.[b.id] || 0) || a.cost - b.cost;
+  const open = SKILLS.filter(n => status(n) === 'unlocked').sort(ord);
+  if (open.length) return { n: open[0], verb: 'FINISH' };
+  const av = SKILLS.filter(n => status(n) === 'avail').sort((a, b) => (b.tier === 'root') - (a.tier === 'root') || (S.gold >= b.cost) - (S.gold >= a.cost) || ord(a, b));
+  return av.length ? { n: av[0], verb: S.gold >= av[0].cost ? 'UNLOCK' : 'SAVE UP FOR' } : null;
+}
+(function harvest() { const days = Math.min(7, Math.floor((Date.parse(today()) - Date.parse(S.harvest || today())) / 864e5)); const per = activeFx().reduce((a, e) => a + (e.daily || 0), 0); if (days > 0 && per) { S.gold += days * per; setTimeout(() => toast(`Evergreen content paid out: +${COIN}${days * per}`), 900); } S.harvest = today(); save(); })();
 
-// passive daily gold
-(function harvest() { const days = Math.min(7, Math.floor((Date.parse(today()) - Date.parse(S.harvest || today())) / 864e5)); const per = activeFx().reduce((a, e) => a + (e.daily || 0), 0); if (days > 0 && per) { S.gold += days * per; setTimeout(() => toast(`Evergreen harvest: +◉${days * per}`), 900); } S.harvest = today(); save(); })();
-
-// ---------- sound (WebAudio, muted by default) ----------
+// ---------- sound ----------
 let ac = null;
 function beep(seq) { if (!S.sound) return; try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); let t = ac.currentTime; for (const [f, d, type] of seq) { const o = ac.createOscillator(), g = ac.createGain(); o.type = type || 'square'; o.frequency.value = f; g.gain.setValueAtTime(.06, t); g.gain.exponentialRampToValueAtTime(.001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d); t += d * .8; } } catch (e) {} }
 const SFX = { cut: [[220, .05, 'sawtooth'], [440, .06], [660, .08]], coin: [[988, .06], [1319, .14]], boss: [[523, .1], [659, .1], [784, .1], [1047, .3]], nope: [[160, .15, 'sawtooth']], tap: [[700, .03]] };
 
 // ---------- tree ----------
 const vp = $('#viewport'), world = $('#world'), nodesEl = $('#nodes'), svg = $('#vines');
-const maxC = Math.max(...SKILLS.map(s => s.c)), maxR = Math.max(...SKILLS.map(s => s.r));
-const W = PAD * 2 + maxC * CW, H = PAD + 30 + maxR * RH + 150;
-world.style.width = W + 'px'; world.style.height = H + 'px'; svg.setAttribute('width', W); svg.setAttribute('height', H);
-const pos = n => [PAD + n.c * CW, PAD + 30 + n.r * RH];
-function staticLayer() {
-  let o = `<rect x="0" y="${H - 60}" width="${W}" height="60" fill="#8a5a2e"/><rect x="0" y="${H - 60}" width="${W}" height="10" fill="#3fa535"/>`;
-  for (const [k, a] of Object.entries(ARCS)) {
-    const cs = SKILLS.filter(s => s.arc === k).map(s => s.c);
-    const x0 = PAD + Math.min(...cs) * CW - CW / 2, x1 = PAD + Math.max(...cs) * CW + CW / 2;
-    o += `<rect x="${x0}" y="70" width="${x1 - x0}" height="${H - 130}" fill="${a.color}" fill-opacity="0.13"/>
-      <rect x="${x0}" y="70" width="${x1 - x0}" height="6" fill="${a.color}"/>
-      <text class="biome-label" x="${x0 + 10}" y="52">${a.name}</text>`;
-  }
-  for (let x = 0; x < W; x += 16) { const h = 10 + ((x * 7) % 17); o += `<rect x="${x}" y="${H - 60 - h}" width="5" height="${h}" fill="#3fa535"/><rect x="${x + 7}" y="${H - 60 - h * .6}" width="5" height="${h * .6}" fill="#6cd043"/>`; }
-  return o;
+const W = LAYOUT.W, H = LAYOUT.H, pos = n => LAYOUT.pos[n.id];
+world.style.width = W + 'px'; world.style.height = H + 'px'; svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+const hash = s => { let h = 7; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return h; };
+function bez(p0, p1, p2, p3, t) { const u = 1 - t; return [u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0], u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1]]; }
+function vineGeom(a, b) {
+  const p0 = pos(a), p3 = pos(b), dx = p3[0] - p0[0], dy = p3[1] - p0[1], L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+  const h = hash(a.id + b.id), w1 = ((h % 5) - 2) * L * .045, w2 = (((h >> 3) % 5) - 2) * L * .045;
+  const p1 = [p0[0] + dx * .33 + nx * w1, p0[1] + dy * .33 + ny * w1], p2 = [p0[0] + dx * .66 - nx * w2, p0[1] + dy * .66 - ny * w2];
+  let thorns = ''; const k = Math.max(3, Math.floor(L / 22));
+  for (let i = 1; i < k; i++) { const t = i / k, [x, y] = bez(p0, p1, p2, p3, t), [x2, y2] = bez(p0, p1, p2, p3, Math.min(1, t + .01)); const tx = x2 - x, ty = y2 - y, tl = Math.hypot(tx, ty) || 1, ux = tx / tl, uy = ty / tl, side = i % 2 ? 1 : -1, px = -uy * side, py = ux * side;
+    thorns += `M${(x - ux * 3).toFixed(1)},${(y - uy * 3).toFixed(1)}L${(x + px * 12 + ux * 3).toFixed(1)},${(y + py * 12 + uy * 3).toFixed(1)}L${(x + ux * 3).toFixed(1)},${(y + uy * 3).toFixed(1)}Z`; }
+  return { d: `M${p0[0]},${p0[1]} C${p1[0].toFixed(1)},${p1[1].toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)} ${p3[0]},${p3[1]}`, thorns };
 }
-const STATIC = staticLayer();
-function vinePath(a, b) { const [x1, y1] = pos(a), [x2, y2] = pos(b); const mx = (x1 + x2) / 2, wob = ((a.c * 13 + b.r * 7) % 3 - 1) * 26; return `M${x1},${y1} C${mx + wob},${y1} ${mx - wob},${y2} ${x2},${y2}`; }
-let sel = null, hintId = null;
+const GEOM = {}; for (const n of SKILLS) for (const r of deps(n)) GEOM[r + '>' + n.id] = vineGeom(byId[r], n);
+function clumpSVG() {
+  let pts = ''; const N = 18; for (let i = 0; i < N * 2; i++) { const a = i / (N * 2) * Math.PI * 2 - Math.PI / 2, r = i % 2 ? 26 + (i * 7 % 5) : 46 + (i * 13 % 7); pts += `${(50 + Math.cos(a) * r).toFixed(1)},${(50 + Math.sin(a) * r).toFixed(1)} `; }
+  let inner = ''; for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2, r = i % 2 ? 18 : 32; inner += `${(50 + Math.cos(a) * r).toFixed(1)},${(50 + Math.sin(a) * r).toFixed(1)} `; }
+  return `<svg class="clump" viewBox="0 0 100 100"><polygon points="${pts}" fill="#3f7a2c" stroke="#101410" stroke-width="4" stroke-linejoin="round"/><polygon points="${inner}" fill="#5f9a3a" stroke="#2a5a1f" stroke-width="2"/><circle cx="50" cy="50" r="20" fill="#2a3a22" stroke="var(--bc)" stroke-width="4"/></svg>`;
+}
+const CLUMP = clumpSVG();
+const ICONS = {}; SKILLS.forEach(n => ICONS[n.id] = iconSVG(n.ic, n.tier === 'root' ? 32 : 28));
+let sel = null;
 function renderTree() {
-  let g = STATIC;
-  for (const n of SKILLS) for (const r of n.req) {
-    const p = byId[r], cls = S.done[n.id] ? 'lit' : S.done[r] ? 'live' : '', d = vinePath(p, n);
-    const [x1, y1] = pos(p), [x2, y2] = pos(n), cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
-    g += `<path class="vine ${cls}" d="${d}"/><path class="vine-core" d="${d}"/><rect class="leaf" x="${cx - 7}" y="${cy - 12}" width="14" height="9" transform="rotate(-30 ${cx} ${cy})"/>`;
+  const B = {}; let thorns = '';
+  const add = (k, d) => B[k] = (B[k] || '') + d;
+  for (const n of SKILLS) for (const r of deps(n)) {
+    const g = GEOM[r + '>' + n.id], kind = n.all.includes(r) ? 'hard' : 'any', prim = LAYOUT.parent[n.id] === r ? 'p' : 's';
+    const st = S.done[n.id] && S.done[r] ? 'lit' : S.done[r] ? 'live' : 'dim';
+    add(`${kind}|${prim}|${st}`, g.d); if (kind === 'hard' && (prim === 'p' || st !== 'dim')) thorns += g.thorns;
   }
-  svg.innerHTML = g;
+  const C = { hard: { dim: '#3c5a2c', live: '#6fae45', lit: '#a8ec5a' }, any: { dim: '#5a5a32', live: '#a4a442', lit: '#d8cf5a' } };
+  const Wd = { p: [12, 6], s: [7, 3] };
+  let o = '';
+  for (const prim of ['s', 'p']) for (const st of ['dim', 'live', 'lit']) for (const kind of ['any', 'hard']) {
+    const d = B[`${kind}|${prim}|${st}`]; if (!d) continue;
+    o += `<path class="v-out" d="${d}" stroke-width="${Wd[prim][0]}"${prim === 's' ? (st === 'dim' ? ' opacity=".3"' : ' opacity=".6"') : ''}/><path class="v-in" d="${d}" stroke="${C[kind][st]}" stroke-width="${Wd[prim][1]}"${prim === 's' ? (st === 'dim' ? ' opacity=".35"' : ' opacity=".6"') : ''}/>`;
+  }
+  o += `<path class="thorn" d="${thorns}"/>`;
+  svg.innerHTML = o;
   const q = ($('#search').value || '').toLowerCase().trim();
-  const nb = nextBest(); hintId = nb && nb.n.id;
+  const nb = nextBest(), hint = nb && nb.n.id;
   nodesEl.innerHTML = SKILLS.map(n => {
-    const st = status(n), [x, y] = pos(n);
-    const hit = (!q || (n.name + ' ' + n.blurb + ' ' + n.why + ' ' + n.steps.join(' ')).toLowerCase().includes(q)) && S.filter.includes(n.arc);
-    const grass = (st === 'locked' || st === 'avail') ? '<div class="grassy"></div>' : '';
-    return `<div class="node ${n.tier} ${st}${hit ? '' : ' dimmed'}${sel === n.id ? ' sel' : ''}${hintId === n.id ? ' hint' : ''}" data-id="${n.id}" style="left:${x}px;top:${y}px" title="${n.blurb.replace(/"/g, '&quot;')}"><span class="ico">${n.icon}</span>${grass}<div class="nm">${n.name}</div>${st === 'avail' && n.cost ? `<div class="cost">◉${n.cost}</div>` : ''}</div>`;
+    const st = status(n), [x, y] = pos(n), b = border(n, st);
+    const hit = (!q || (n.name + ' ' + n.what + ' ' + n.blurb + ' ' + n.steps.join(' ')).toLowerCase().includes(q)) && S.filter.includes(n.arc);
+    const grass = st === 'avail' && n.tier !== 'root' ? '<div class="grassy"></div>' : '';
+    const shape = n.tier === 'root' ? CLUMP : '<div class="dia"></div>';
+    const cost = st === 'avail' && n.cost ? `<div class="cost">${COIN}${n.cost}</div>` : '';
+    return `<div class="node ${n.tier} ${st} ${b}${hit ? '' : ' dimmed'}${sel === n.id ? ' sel' : ''}${hint === n.id ? ' hint' : ''}" data-id="${n.id}" style="left:${x}px;top:${y}px" aria-label="${esc(n.name + ': ' + n.what)}">${shape}${ICONS[n.id]}${grass}<div class="nm">${n.name.replace(/^(ROOT|GATE): /, '')}</div>${cost}</div>`;
   }).join('');
-  $('#next').textContent = nb ? `▶ ${nb.verb}: ${nb.n.icon} ${nb.n.name}` : (Object.keys(S.done).length === SKILLS.length ? '🏆 FIELD CLEARED' : '');
+  $('#next').textContent = nb ? `▶ NEXT · ${nb.verb}: ${nb.n.name.replace(/^(ROOT|GATE): /, '')}` : (Object.keys(S.done).length === SKILLS.length ? '🏆 FIELD CLEARED' : '');
   renderHud();
 }
+const STLABEL = { done: '✔ Cleared', unlocked: 'In progress: do the goal, then tap "I did it"', avail: 'Ready to unlock', locked: 'Locked', forked: 'You picked the other path' };
+nodesEl.addEventListener('mouseover', e => { const el = e.target.closest('.node'); if (!el || isMobile()) return; const n = byId[el.dataset.id], st = status(n);
+  const t = $('#tip'); const miss = st === 'locked' ? missing(n) : [];
+  t.innerHTML = `<b>${esc(n.name)}</b>${esc(n.what)}<span class="st">${STLABEL[st]}${st === 'avail' ? ` · costs ${COIN}${n.cost}` : ''}${miss.length ? '<br>Needs: ' + esc(miss.join('; ')) : ''}</span>`;
+  const r = el.getBoundingClientRect(), v = vp.getBoundingClientRect(); t.classList.remove('hidden');
+  let lx = r.right - v.left + 8, ly = r.top - v.top; if (lx + 280 > v.width) lx = r.left - v.left - 290; t.style.left = Math.max(4, lx) + 'px'; t.style.top = Math.max(4, Math.min(ly, v.height - t.offsetHeight - 4)) + 'px'; });
+nodesEl.addEventListener('mouseout', e => { if (e.target.closest('.node')) $('#tip').classList.add('hidden'); });
 
 // ---------- HUD ----------
 let shownGold = S.gold;
 function effRunway() { let r = Number(S.runway) || 0; for (const e of activeFx()) r += e.runway || 0; if (activeFx().some(e => e.drainX)) r = r / 2; return Math.round(r * 10) / 10; }
+function gateProgress() { const g = byId[LAUNCH_GATE]; const parts = [...g.all.map(r => [r]), ...g.any]; return { done: parts.filter(p => p.some(r => S.done[r])).length, total: parts.length, parts }; }
 function renderHud() {
   const gEl = $('#gold');
-  if (shownGold !== S.gold) { const from = shownGold, to = S.gold, t0 = performance.now(); shownGold = to; gEl.classList.remove('pop'); void gEl.offsetWidth; gEl.classList.add('pop');
-    const step = t => { const k = Math.min(1, (t - t0) / 600); gEl.textContent = Math.round(from + (to - from) * k); if (k < 1) requestAnimationFrame(step); }; requestAnimationFrame(step);
+  if (shownGold !== S.gold) { const from = shownGold, to = S.gold, t0 = performance.now(); shownGold = to; const pill = $('#coinpill'); pill.classList.remove('pop'); void pill.offsetWidth; pill.classList.add('pop');
+    const step = t => { const k = Math.min(1, (t - t0) / 700); gEl.textContent = Math.round(from + (to - from) * k); if (k < 1) requestAnimationFrame(step); }; requestAnimationFrame(step);
   } else gEl.textContent = S.gold;
   const r = effRunway(), safe = activeFx().some(e => e.noDrain), bar = $('#o2bar');
   bar.style.width = (safe ? 100 : Math.min(100, r / 24 * 100)) + '%';
   bar.parentElement.classList.toggle('low', !safe && r < 6);
-  bar.parentElement.parentElement.title = safe ? 'Oxygen stable: runway no longer drains' : `${r} months effective runway${r < 6 ? ' (LOW: consult, cut costs or raise prices)' : ''}`;
-  const gates = SKILLS.filter(n => n.gate), pct = Math.round(gates.filter(n => S.done[n.id]).length / gates.length * 100);
-  $('#readybar').style.width = pct + '%'; $('#readypct').textContent = pct + '%';
+  bar.parentElement.parentElement.title = safe ? 'Runway is safe: it no longer runs out' : `${r} months of runway${r < 6 ? '. LOW: take client work, cut costs, or raise prices' : ''}. Tap the number to edit.`;
+  const gp = gateProgress(); $('#readybar').style.width = (gp.done / gp.total * 100) + '%'; $('#readypct').textContent = S.done[LAUNCH_GATE] ? 'GO!' : `${gp.done}/${gp.total}`;
   const used = S.swings.active.length, mx = maxSwings();
-  $('#swings').textContent = '⚔'.repeat(Math.max(0, mx - used)) + '·'.repeat(Math.min(used, mx));
+  $('#swings').textContent = '■'.repeat(Math.min(used, mx)) + '□'.repeat(Math.max(0, mx - used));
   $('#depth').textContent = Object.keys(S.done).length + '/' + SKILLS.length;
   $('#btn-sound').textContent = S.sound ? '🔊' : '🔇';
+  $('#btn-theme').textContent = S.theme === 'classic' ? '☾' : '☀';
 }
 
 // ---------- panel ----------
 const list = (a, tag = 'ul') => a && a.length ? `<${tag}>${a.map(x => `<li>${x}</li>`).join('')}</${tag}>` : '';
 function sheetOpen(el) { el.classList.remove('hidden'); el.scrollTop = 0; }
+const reqTag = r => `<span class="tag req ${S.done[r] ? 'y' : 'n'}" data-open="${r}">${S.done[r] ? '✔' : '✖'} ${byId[r].name}</span>`;
 function openNode(id) {
-  const n = byId[id]; if (!n) return; sel = id;
-  const st = status(n), arc = ARCS[n.arc];
-  const reqs = n.req.map(r => `<span class="tag row" data-open="${r}" style="background:${S.done[r] ? '#e3f7c6' : '#ffe0d6'}">${S.done[r] ? '✔' : '✖'} ${byId[r].name}</span>`).join('') || '<span class="empty">None: start here.</span>';
-  const kids = SKILLS.filter(k => k.req.includes(id)).map(k => `<span class="tag row" data-open="${k.id}">${k.icon} ${k.name}</span>`).join('');
-  const rivals = n.excl ? SKILLS.filter(o => o.excl === n.excl && o.id !== n.id).map(o => o.name).join(', ') : '';
-  const swinging = S.swings.active.includes(id), rw = reward(n), fx = EFFECTS[id];
+  const n = byId[id]; if (!n) return; sel = id; $('#tip').classList.add('hidden');
+  const st = status(n), arc = ARCS[n.arc], rw = reward(n), fx = EFFECTS[id];
+  const kids = SKILLS.filter(k => deps(k).includes(id)).map(k => `<span class="tag req" data-open="${k.id}">${k.name}</span>`).join('');
+  const rv = rivals(n).map(o => o.name).join(', ');
+  const swinging = S.swings.active.includes(id);
+  const credit = `<button class="ghost" data-a="credit">I'VE ALREADY DONE THIS · +${COIN}${rw}</button>`;
   let act = '';
-  if (st === 'avail') act = `<button class="gold" data-a="unlock">✂ CUT IN · ◉${n.cost}</button>${S.gold < n.cost ? `<span class="empty">You have ◉${S.gold}. Finish an open chapter to earn more.</span>` : ''}`;
-  if (st === 'unlocked') act = `<button class="gold" data-a="done">✔ DONE-WHEN MET · +◉${rw}</button><button data-a="swing">${swinging ? '✖ END SWING' : '⚔ SWING THIS WEEK'}</button>`;
-  if (st === 'done') act = `<span class="tag" style="background:#e3f7c6">✔ CUT</span><button data-a="undo">UNDO</button>`;
-  if (n.excl && (st === 'unlocked' || st === 'done')) act += `<button class="danger" data-a="replant">REPLANT FORK</button>`;
-  if (st === 'locked') act = `<span class="empty">🌿 Overgrown: finish the prerequisites below first.</span>`;
-  if (st === 'forked') act = `<span class="empty">You chose a different fork (${rivals}). Open it and hit REPLANT to switch.</span>`;
+  if (st === 'avail' && !n.cost) act = `<button class="gold" data-a="done">✔ I DID IT · +${COIN}${rw}</button><span class="hint-line">Milestones are free to claim once you've really done them.</span>`;
+  else if (st === 'avail') act = `<button class="gold" data-a="unlock">UNLOCK · ${COIN}${n.cost}</button>${credit}${S.gold < n.cost ? `<span class="hint-line">You have ${COIN}${S.gold}. Clear a chapter you've started to earn more.</span>` : ''}`;
+  if (st === 'unlocked') act = `<button class="gold" data-a="done">✔ I DID IT · +${COIN}${rw}</button><button data-a="swing">${swinging ? 'REMOVE FROM THIS WEEK' : '+ ADD TO THIS WEEK'}</button>`;
+  if (st === 'done') act = `<span class="tag req y">✔ CLEARED${S.credit[id] ? ' (credited)' : ''}</span><button class="ghost" data-a="undo">UNDO</button>`;
+  if (n.excl && (st === 'unlocked' || st === 'done')) act += `<button class="danger" data-a="replant">CHANGE MY MIND</button>`;
+  if (st === 'locked') act = `<span class="hint-line">🔒 Locked. Needs ${esc(missing(n).join('; '))}.</span>${credit}`;
+  if (st === 'forked') act = `<span class="hint-line">You picked the other path (${rv}).</span><button data-a="switch">SWITCH TO THIS PATH</button>`;
+  const reqHtml = (n.all.length ? `<div class="reqrow"><span class="lab">NEEDS ALL OF</span>${n.all.map(reqTag).join('')}</div>` : '') +
+    n.any.map(g => `<div class="reqrow"><span class="lab">PLUS ANY ONE OF</span>${g.map(reqTag).join('')}</div>`).join('') || '<span class="empty">Nothing. This is where you start.</span>';
   $('#panel-body').innerHTML = `
-    <span class="tag" style="background:${arc.color}">${arc.name}</span><span class="tag">${n.tier.toUpperCase()}</span>${n.gate ? '<span class="tag" style="background:#ffe9a8">LAUNCH GATE</span>' : ''}${n.excl ? `<span class="tag" style="background:#f0dcff">FORK · excludes ${rivals}</span>` : ''}
-    <h2>${n.icon} ${n.name}</h2><p><i>${n.blurb}</i></p>
+    <span class="tag" style="background:${arc.color}">${arc.name}</span>${n.tier === 'root' ? '<span class="tag" style="background:#ffe9a8">MILESTONE</span>' : `<span class="tag">${n.tier.toUpperCase()}</span>`}${id === LAUNCH_GATE ? '<span class="tag" style="background:#ffe9a8">LAUNCH GATE</span>' : ''}${n.excl ? `<span class="tag" style="background:#f0dcff">PICK ONE · or ${rv}</span>` : ''}
+    <h2>${iconSVG(n.ic, 36)}<span>${n.name}</span></h2>
+    <div class="what"><b>WHAT THIS IS</b>${n.what}</div>
+    <div class="goal"><b>TO CLEAR THIS:</b>${n.goal}</div>
     <div class="actions">${act}</div>
-    <h3>DONE WHEN</h3><div class="done-when">${n.done}</div>
-    ${n.week ? `<h3>⚔ DO THIS WEEK</h3><p>${n.week}</p>` : ''}
+    ${n.week ? `<h3>START THIS WEEK</h3><p>${n.week}</p>` : ''}
     <h3>WHY IT MATTERS</h3><p>${n.why}</p>
     <h3>STEPS</h3>${list(n.steps, 'ol')}
     ${n.template ? `<h3>TEMPLATE</h3><div class="tpl">${n.template}</div>` : ''}
-    <h3>PITFALLS</h3><div class="pit">${list(n.pitfalls)}</div>
-    ${n.mods && n.mods.length ? `<h3>GRANTS</h3>${fx ? `<div class="buff fx">⚙ <b>In-game effect:</b> ${fx.txt}</div>` : ''}${n.mods.map(m => `<div class="buff perk">📜 ${m}${fx ? '' : ' <small>(real-world perk, not simulated)</small>'}</div>`).join('')}` : ''}
-    <h3>REQUIRES</h3><div>${reqs}</div>
-    ${kids ? `<h3>UNLOCKS</h3><div>${kids}</div>` : ''}`;
+    <h3>COMMON MISTAKES</h3><div class="pit">${list(n.pitfalls)}</div>
+    ${n.mods && n.mods.length ? `<h3>BONUSES</h3>${fx ? `<div class="buff fx">⚙ <b>In-game:</b> ${fx.txt}</div>` : ''}${n.mods.map(m => `<div class="buff perk">📜 ${m}${fx ? '' : ' <small>(real-world benefit, not simulated)</small>'}</div>`).join('')}` : ''}
+    <h3>REQUIREMENTS</h3><div class="reqs">${reqHtml}</div>
+    ${kids ? `<h3>LEADS TO</h3><div>${kids}</div>` : ''}`;
   sheetOpen($('#panel')); $('#drawer').classList.add('hidden');
   renderTree();
 }
 function fxAt(n) { const el = nodesEl.querySelector(`[data-id="${n.id}"]`); if (!el) return [innerWidth / 2, innerHeight / 2]; const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
+function clear(n, credited) {
+  const rw = reward(n) + ((EFFECTS[n.id] || {}).bonus || 0); const before = new Set(SKILLS.filter(k => status(k) === 'avail').map(k => k.id));
+  S.done[n.id] = 1; S.unlocked[n.id] = 1; if (credited) S.credit[n.id] = 1; S.gold += rw; S.swings.active = S.swings.active.filter(x => x !== n.id); save(); renderTree();
+  const [x, y] = fxAt(n); cutFx(x, y); coinFx(x, y, rw); bumpNode(n); beep(SFX.coin);
+  const fresh = SKILLS.filter(k => status(k) === 'avail' && !before.has(k.id));
+  fresh.forEach((k, i) => setTimeout(() => { const [a, b] = fxAt(k); ringFx(a, b); }, 350 + i * 90));
+  if (n.tier === 'root') { shake(); beep(SFX.boss); setTimeout(() => bossModal(n, rw, fresh), 450); }
+  else toast(`+${COIN}${rw}${fresh.length ? ` · ${fresh.length} new chapter${fresh.length > 1 ? 's' : ''} ready` : ''}`);
+}
 $('#panel').addEventListener('click', e => {
   const o = e.target.closest('[data-open]'); if (o) { beep(SFX.tap); openNode(o.dataset.open); focusNode(byId[o.dataset.open]); return; }
   const b = e.target.closest('[data-a]'); if (!b || !sel) return; const n = byId[sel], a = b.dataset.a;
   if (a === 'unlock') {
-    if (S.gold < n.cost) { beep(SFX.nope); shake(); return toast(`Need ◉${n.cost - S.gold} more gold`); }
-    S.gold -= n.cost; S.unlocked[n.id] = 1; save(); renderTree(); const [x, y] = fxAt(n); cutFx(x, y); bumpNode(n); beep(SFX.cut); toast('✂ Grass cut: chapter open');
+    if (S.gold < n.cost) { beep(SFX.nope); shake(); return toast(`Need ${COIN}${n.cost - S.gold} more gold`); }
+    S.gold -= n.cost; S.unlocked[n.id] = 1; save(); renderTree(); const [x, y] = fxAt(n); cutFx(x, y); bumpNode(n); beep(SFX.cut); toast('✂ Unlocked! Now do the goal.');
   }
-  if (a === 'done') {
-    const rw = reward(n) + ((EFFECTS[n.id] || {}).bonus || 0); const before = new Set(SKILLS.filter(k => status(k) === 'avail').map(k => k.id));
-    S.done[n.id] = 1; S.gold += rw; S.swings.active = S.swings.active.filter(x => x !== n.id); save(); renderTree();
-    const [x, y] = fxAt(n); cutFx(x, y); coinFx(x, y, rw); bumpNode(n); beep(SFX.coin);
-    const fresh = SKILLS.filter(k => status(k) === 'avail' && !before.has(k.id));
-    if (n.tier === 'root') { shake(); beep(SFX.boss); bossModal(n, rw, fresh); }
-    else toast(`+◉${rw}${fresh.length ? ` · ${fresh.length} new path${fresh.length > 1 ? 's' : ''} revealed` : ''}`);
-  }
-  if (a === 'undo') { delete S.done[n.id]; S.gold = Math.max(0, S.gold - reward(n)); }
-  if (a === 'swing') { const i = S.swings.active.indexOf(n.id); if (i >= 0) S.swings.active.splice(i, 1); else if (S.swings.active.length >= maxSwings()) { beep(SFX.nope); return toast('No swing charges left. They refill Monday.'); } else { S.swings.active.push(n.id); beep(SFX.tap); toast('⚔ Added to This Week'); } }
-  if (a === 'replant') { if (S.done[n.id]) S.gold = Math.max(0, S.gold - reward(n)); S.gold += n.cost; delete S.done[n.id]; delete S.unlocked[n.id]; toast('🌱 Fork replanted: choose again'); }
+  if (a === 'done') clear(n, false);
+  if (a === 'credit') { if (forkedAway(n)) return toast('You picked the other path. Switch first.'); clear(n, true); }
+  if (a === 'undo') { delete S.done[n.id]; delete S.credit[n.id]; S.gold = Math.max(0, S.gold - reward(n)); }
+  if (a === 'swing') { const i = S.swings.active.indexOf(n.id); if (i >= 0) S.swings.active.splice(i, 1); else if (S.swings.active.length >= maxSwings()) { beep(SFX.nope); return toast('This week is full. Slots refill on Monday.'); } else { S.swings.active.push(n.id); beep(SFX.tap); toast('Added to This Week'); } }
+  if (a === 'replant') { if (S.done[n.id]) S.gold = Math.max(0, S.gold - reward(n)); if (!S.credit[n.id]) S.gold += n.cost; delete S.done[n.id]; delete S.unlocked[n.id]; delete S.credit[n.id]; toast('Choice undone: pick again'); }
+  if (a === 'switch') { for (const r of rivals(n)) { if (S.done[r.id]) S.gold = Math.max(0, S.gold - reward(r)); if (S.unlocked[r.id] && !S.credit[r.id]) S.gold += r.cost; delete S.done[r.id]; delete S.unlocked[r.id]; delete S.credit[r.id]; } toast('Switched. This path is open now.'); }
   save(); openNode(n.id);
 });
 $('#close').onclick = () => { $('#panel').classList.add('hidden'); sel = null; renderTree(); };
@@ -179,43 +219,46 @@ $('#dclose').onclick = () => $('#drawer').classList.add('hidden');
 function drawer(html) { $('#drawer-body').innerHTML = html; sheetOpen($('#drawer')); $('#panel').classList.add('hidden'); }
 $('#btn-buffs').onclick = () => {
   const fx = activeFx(), perks = SKILLS.filter(n => S.done[n.id] && n.mods && n.mods.length && !EFFECTS[n.id]);
-  const arcs = Object.keys(ARCS).map(k => `${ARCS[k].name.split(' · ')[1]}: ×${goldMul({ arc: k }).toFixed(2)}`).join('<br>');
-  drawer(`<h2>⚙ ACTIVE BUFFS</h2>
-   <h3>GOLD MULTIPLIERS (LIVE)</h3><div class="mult">${arcs}</div>
-   <h3>IN-GAME EFFECTS</h3>${fx.length ? fx.map(e => `<div class="buff fx">⚙ ${e.txt}<br><small>from ${byId[e.id].icon} ${byId[e.id].name}</small></div>`).join('') : '<p class="empty">None yet. Completing First Swing gives +1 swing, and Payments Live gives ×1.25 gold.</p>'}
-   <h3>REAL-WORLD PERKS (NOT SIMULATED)</h3>${perks.length ? perks.map(n => n.mods.map(m => `<div class="buff perk">📜 ${m}<br><small>from ${n.icon} ${n.name}</small></div>`).join('')).join('') : '<p class="empty">These are the real advantages a finished chapter gives you, like sharper copy or a warm audience.</p>'}
-   <h3>LAUNCH GATES</h3>${list(SKILLS.filter(n => n.gate).map(n => `<span class="row" data-open="${n.id}">${S.done[n.id] ? '✔' : '□'} ${n.name}</span>`))}`);
+  const arcs = Object.keys(ARCS).map(k => `${ARCS[k].name}: ×${goldMul({ arc: k }).toFixed(2)}`).join('<br>');
+  const gp = gateProgress();
+  drawer(`<h2>BONUSES</h2>
+   <h3>GOLD MULTIPLIERS RIGHT NOW</h3><div class="mult">${arcs}</div>
+   <h3>IN-GAME EFFECTS</h3>${fx.length ? fx.map(e => `<div class="buff fx">⚙ ${e.txt}<br><small>from ${byId[e.id].name}</small></div>`).join('') : '<p class="empty">None yet. First Swing adds a weekly slot, and Payments Live multiplies all gold by 1.25.</p>'}
+   <h3>REAL-WORLD BENEFITS (NOT SIMULATED)</h3>${perks.length ? perks.map(n => n.mods.map(m => `<div class="buff perk">📜 ${m}<br><small>from ${n.name}</small></div>`).join('')).join('') : '<p class="empty">The real advantages that cleared chapters give you will show up here.</p>'}
+   <h3>LAUNCH ESSENTIALS (${gp.done}/${gp.total})</h3>${list(gp.parts.map(p => `<span class="row" data-open="${p[0]}">${p.some(r => S.done[r]) ? '✔' : '□'} ${p.map(r => byId[r].name).join(' <i>or</i> ')}</span>`))}`);
 };
 $('#btn-week').onclick = () => {
-  const row = n => `<div class="buff fx row" data-open="${n.id}">${n.icon} <b>${n.name}</b><br>⚔ ${n.week || n.done}</div>`;
+  const row = n => `<div class="buff fx row" data-open="${n.id}"><b>${n.name}</b><br>${n.week || n.goal}</div>`;
   const act = S.swings.active.map(id => byId[id]), open = SKILLS.filter(n => status(n) === 'unlocked' && !S.swings.active.includes(n.id)), av = SKILLS.filter(n => status(n) === 'avail').slice(0, 6);
-  drawer(`<h2>⚔ THIS WEEK</h2><p>Up to ${maxSwings()} active swings at a time. They refill every Monday.</p>
-   <h3>ACTIVE SWINGS (${act.length}/${maxSwings()})</h3>${act.length ? act.map(row).join('') : '<p class="empty">None yet. Open a chapter and tap ⚔ SWING THIS WEEK.</p>'}
-   <h3>OPEN CHAPTERS</h3>${open.length ? open.map(row).join('') : '<p class="empty">No open chapters.</p>'}
-   <h3>READY TO CUT</h3>${av.length ? av.map(row).join('') : '<p class="empty">Finish prerequisites to reveal more.</p>'}`);
+  drawer(`<h2>THIS WEEK</h2><p>Focus on up to ${maxSwings()} chapters at a time. Slots refill every Monday.</p>
+   <h3>FOCUSING ON (${act.length}/${maxSwings()})</h3>${act.length ? act.map(row).join('') : '<p class="empty">Nothing yet. Open a chapter and tap + ADD TO THIS WEEK.</p>'}
+   <h3>STARTED</h3>${open.length ? open.map(row).join('') : '<p class="empty">No chapters started.</p>'}
+   <h3>READY TO UNLOCK</h3>${av.length ? av.map(row).join('') : '<p class="empty">Clear more chapters to open new ones.</p>'}`);
 };
 $('#drawer').addEventListener('click', e => { const t = e.target.closest('[data-open]'); if (t) { openNode(t.dataset.open); focusNode(byId[t.dataset.open]); } });
-$('#btn-reset').onclick = () => { if (confirm('Burn the field and restart? All progress will be cleared.')) { const snd = S.sound; S = fresh(); S.sound = snd; S.onboarded = true; shownGold = 0; save(); sel = null; $('#panel').classList.add('hidden'); $('#drawer').classList.add('hidden'); $('#search').value = ''; renderFilters(); renderTree(); fit(); toast('🔥 Field reset'); } };
+$('#btn-reset').onclick = () => { if (confirm('Start over? This clears all your progress.')) { const keep = { sound: S.sound, theme: S.theme }; S = Object.assign(fresh(), keep, { onboarded: true }); shownGold = 0; save(); sel = null; $('#panel').classList.add('hidden'); $('#drawer').classList.add('hidden'); $('#search').value = ''; $('#runway').value = S.runway; renderFilters(); renderTree(); fit(); toast('Fresh field. Good luck!'); } };
 $('#btn-sound').onclick = () => { S.sound = !S.sound; save(); renderHud(); beep(SFX.coin); };
+$('#btn-theme').onclick = () => { S.theme = S.theme === 'classic' ? 'meadow' : 'classic'; document.body.className = S.theme; save(); renderHud(); setTop(); toast(S.theme === 'classic' ? 'Classic (dark) theme' : 'Meadow (day) theme'); };
 $('#btn-menu').onclick = () => { $('#top').classList.toggle('open'); setTop(); };
-$('#btn-help').onclick = () => onboard(0);
-$('#next').onclick = () => { const nb = nextBest(); if (nb) { focusNode(nb.n); openNode(nb.n.id); } };
+$('#btn-help').onclick = () => intro(0);
+$('#next').onclick = () => { const nb = nextBest(); if (nb) { openNode(nb.n.id); focusNode(nb.n); } };
 $('#runway').value = S.runway;
 $('#runway').oninput = e => { S.runway = Math.max(0, Number(e.target.value) || 0); save(); renderHud(); };
-$('#search').oninput = () => { renderTree(); const q = $('#search').value.trim().toLowerCase(); if (q) { const m = SKILLS.find(n => n.name.toLowerCase().includes(q)); if (m) focusNode(m); } };
-function renderFilters() { $('#arcfilters').innerHTML = Object.entries(ARCS).map(([k, a]) => `<span class="chip ${S.filter.includes(k) ? 'on' : ''}" data-k="${k}"><i style="background:${a.color}"></i>${a.name.split(' · ')[1]}</span>`).join(''); }
+$('#search').oninput = () => { renderTree(); const q = $('#search').value.trim().toLowerCase(); if (q) { const m = SKILLS.find(n => (n.name + ' ' + n.what).toLowerCase().includes(q)); if (m) focusNode(m); } };
+function renderFilters() { $('#arcfilters').innerHTML = Object.entries(ARCS).map(([k, a]) => `<span class="chip ${S.filter.includes(k) ? 'on' : ''}" data-k="${k}"><i style="background:${a.color}"></i>${a.name}</span>`).join(''); }
 $('#arcfilters').onclick = e => { const c = e.target.closest('[data-k]'); if (!c) return; const k = c.dataset.k; S.filter = S.filter.includes(k) ? S.filter.filter(x => x !== k) : [...S.filter, k]; save(); renderFilters(); renderTree(); };
 
 // ---------- pan / pinch / wheel ----------
 let tx = 0, ty = 0, sc = 1;
 const apply = () => { world.style.transform = `translate(${tx}px,${ty}px) scale(${sc})`; };
-const clampS = s => Math.min(1.8, Math.max(.22, s));
-function fit() { const r = vp.getBoundingClientRect(); sc = clampS(isMobile() ? Math.min(.62, r.height / H) : Math.min(1, r.height / H)); tx = isMobile() ? 10 - (PAD - 70) * sc : 20; ty = (r.height - H * sc) / 2; apply(); }
-function focusNode(n) { const r = vp.getBoundingClientRect(); const [x, y] = pos(n); const fy = isMobile() && !$('#panel').classList.contains('hidden') ? r.height * .1 + 30 : r.height / 2; tx = (isMobile() ? r.width / 2 : r.width / 3) - x * sc; ty = fy - y * sc; world.style.transition = 'transform .35s ease-out'; apply(); setTimeout(() => world.style.transition = '', 360); }
+const clampS = s => Math.min(2, Math.max(.2, s));
+function fit() { const r = vp.getBoundingClientRect(); const pad = isMobile() ? 40 : 70; sc = clampS(Math.min((r.width - 20) / W, (r.height - pad * 2) / H)); tx = (r.width - W * sc) / 2; ty = (r.height - H * sc) / 2 + (isMobile() ? 6 : 10); apply(); }
+function home() { const nb = nextBest(); sc = isMobile() ? .62 : .85; focusNode(nb ? nb.n : byId['founder-mode']); world.style.transition = ''; }
+function focusNode(n, zoom) { const r = vp.getBoundingClientRect(); if (zoom) sc = clampS(zoom); const [x, y] = pos(n); const panelOpen = !$('#panel').classList.contains('hidden'); const fy = isMobile() && panelOpen ? Math.max(60, (r.height - $('#panel').offsetHeight) / 2 + 20) : r.height / 2; const fx = !isMobile() && panelOpen ? (r.width - 540) / 2 : r.width / 2; tx = fx - x * sc; ty = fy - y * sc; world.style.transition = 'transform .35s ease-out'; apply(); setTimeout(() => world.style.transition = '', 360); }
 const ptrs = new Map(); let pan = null, pinch = null, moved = false;
 vp.addEventListener('pointerdown', e => {
   if (e.target.closest('#legend,#next')) return;
-  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); vp.setPointerCapture && vp.setPointerCapture(e.pointerId);
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { vp.setPointerCapture(e.pointerId); } catch (_) {}
   if (ptrs.size === 1) { pan = { x: e.clientX - tx, y: e.clientY - ty, sx: e.clientX, sy: e.clientY, target: e.target }; moved = false; }
   if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), s: sc, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, tx, ty }; moved = true; }
 });
@@ -223,55 +266,76 @@ vp.addEventListener('pointermove', e => {
   if (!ptrs.has(e.pointerId)) return; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pinch && ptrs.size >= 2) { const [a, b] = [...ptrs.values()], r = vp.getBoundingClientRect(); const ns = clampS(pinch.s * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d); const mx = pinch.mx - r.left, my = pinch.my - r.top; tx = mx - (mx - pinch.tx) * ns / pinch.s; ty = my - (my - pinch.ty) * ns / pinch.s; sc = ns; apply(); return; }
   if (!pan) return;
-  if (Math.abs(e.clientX - pan.sx) + Math.abs(e.clientY - pan.sy) > 8) { moved = true; vp.classList.add('drag'); }
+  if (Math.abs(e.clientX - pan.sx) + Math.abs(e.clientY - pan.sy) > 8) { moved = true; vp.classList.add('drag'); $('#tip').classList.add('hidden'); }
   if (moved) { tx = e.clientX - pan.x; ty = e.clientY - pan.y; apply(); }
 });
 function ptrEnd(e) {
   if (!ptrs.has(e.pointerId)) return; ptrs.delete(e.pointerId);
   if (ptrs.size < 2) pinch = null;
   if (ptrs.size === 1) { const [p] = [...ptrs.values()]; pan = { x: p.x - tx, y: p.y - ty, sx: p.x, sy: p.y }; return; }
-  if (pan && !moved) { const el = pan.target && pan.target.closest && pan.target.closest('.node'); if (el) { beep(SFX.tap); openNode(el.dataset.id); if (isMobile()) focusNode(byId[el.dataset.id]); } }
+  if (pan && !moved) { const el = pan.target && pan.target.closest && pan.target.closest('.node'); if (el) { beep(SFX.tap); openNode(el.dataset.id); focusNode(byId[el.dataset.id]); } }
   pan = null; vp.classList.remove('drag');
 }
 vp.addEventListener('pointerup', ptrEnd); vp.addEventListener('pointercancel', ptrEnd);
 vp.addEventListener('wheel', e => { e.preventDefault(); const r = vp.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top; const ns = clampS(sc * (e.deltaY < 0 ? 1.12 : .89)); tx = mx - (mx - tx) * ns / sc; ty = my - (my - ty) * ns / sc; sc = ns; apply(); }, { passive: false });
 $('#btn-fit').onclick = fit;
 function setTop() { document.documentElement.style.setProperty('--toph', $('#top').offsetHeight + 'px'); }
-window.addEventListener('resize', () => { setTop(); });
+window.addEventListener('resize', setTop); if (window.ResizeObserver) new ResizeObserver(setTop).observe($('#top')); if (document.fonts) document.fonts.ready.then(setTop);
 
 // ---------- juice ----------
 const layer = $('#fxlayer');
-function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('show'), 2000); }
+function toast(t) { const el = $('#toast'); el.innerHTML = t; el.style.left = !isMobile() && !$('#panel').classList.contains('hidden') ? Math.max(200, (innerWidth - 540) / 2) + 'px' : ''; el.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('show'), 2200); }
 function shake() { vp.classList.remove('shake'); void vp.offsetWidth; vp.classList.add('shake'); if (navigator.vibrate) try { navigator.vibrate(30); } catch (e) {} }
 function bumpNode(n) { const el = nodesEl.querySelector(`[data-id="${n.id}"]`); if (el) { el.classList.add('cutnow'); setTimeout(() => el.classList.remove('cutnow'), 500); } }
-function spawn(cls, x, y, txt) { const b = document.createElement('div'); b.className = cls; b.style.left = x + 'px'; b.style.top = y + 'px'; if (txt) b.textContent = txt; layer.appendChild(b); return b; }
+function spawn(cls, x, y, txt) { const b = document.createElement('div'); b.className = cls; b.style.left = x + 'px'; b.style.top = y + 'px'; if (txt) b.innerHTML = txt; layer.appendChild(b); return b; }
 function cutFx(x, y) {
-  for (let i = 0; i < 26; i++) { const b = spawn('blade', x, y); const a = -Math.PI * Math.random(), d = 50 + Math.random() * 90;
+  for (let i = 0; i < 28; i++) { const b = spawn('blade', x, y); const a = -Math.PI * Math.random(), d = 50 + Math.random() * 90;
     b.animate([{ transform: 'translate(0,0) rotate(0)', opacity: 1 }, { transform: `translate(${Math.cos(a) * d}px,${Math.sin(a) * d}px) rotate(${(Math.random() - .5) * 720}deg)`, opacity: 1, offset: .6 }, { transform: `translate(${Math.cos(a) * d * 1.2}px,${Math.sin(a) * d + 80}px) rotate(${(Math.random() - .5) * 900}deg)`, opacity: 0 }], { duration: 800 + Math.random() * 300, easing: 'cubic-bezier(.2,.8,.4,1)' }).onfinish = () => b.remove(); }
-  const s = spawn('plus', x - 20, y - 20, '✂'); s.animate([{ transform: 'rotate(-90deg) scale(.5)', opacity: 1 }, { transform: 'rotate(200deg) scale(2)', opacity: 0 }], { duration: 450 }).onfinish = () => s.remove();
+  const s = spawn('plus', x - 24, y - 24, iconSVG('scythe', 48)); s.animate([{ transform: 'rotate(-80deg) scale(.8)', opacity: 1 }, { transform: 'rotate(60deg) scale(1.3)', opacity: 1, offset: .6 }, { transform: 'rotate(80deg) scale(1.3)', opacity: 0 }], { duration: 480, easing: 'ease-in' }).onfinish = () => s.remove();
 }
 function coinFx(x, y, amt) {
-  const g = $('#gold').getBoundingClientRect(), gx = g.left + 10, gy = g.top + 6;
-  for (let i = 0; i < Math.min(14, 4 + amt / 15); i++) { const c = spawn('coinfx', x, y); const ox = (Math.random() - .5) * 120, oy = -40 - Math.random() * 70;
-    c.animate([{ transform: 'translate(0,0) scale(.4)' }, { transform: `translate(${ox}px,${oy}px) scale(1.1)`, offset: .35 }, { transform: `translate(${gx - x}px,${gy - y}px) scale(.6)`, opacity: .9 }], { duration: 900 + i * 40, easing: 'cubic-bezier(.5,0,.7,1)' }).onfinish = () => c.remove(); }
-  const p = spawn('plus', x - 30, y - 50, `+${amt}`); p.animate([{ transform: 'translateY(0) scale(.6)', opacity: 1 }, { transform: 'translateY(-50px) scale(1.4)', opacity: 1, offset: .5 }, { transform: 'translateY(-80px) scale(1.2)', opacity: 0 }], { duration: 1100 }).onfinish = () => p.remove();
+  const g = $('#coinpill').getBoundingClientRect(), gx = g.left + 14, gy = g.top + 10;
+  for (let i = 0; i < Math.min(16, 5 + amt / 15); i++) { const c = spawn('coinfx', x, y); const ox = (Math.random() - .5) * 140, oy = -40 - Math.random() * 80;
+    c.animate([{ transform: 'translate(0,0) scale(.4)' }, { transform: `translate(${ox}px,${oy}px) scale(1.15)`, offset: .35 }, { transform: `translate(${gx - x}px,${gy - y}px) scale(.6)`, opacity: .9 }], { duration: 900 + i * 45, easing: 'cubic-bezier(.5,0,.7,1)' }).onfinish = () => c.remove(); }
+  const p = spawn('plus', x - 30, y - 50, `+${amt}`); p.animate([{ transform: 'translateY(0) scale(.6)', opacity: 1 }, { transform: 'translateY(-50px) scale(1.5)', opacity: 1, offset: .5 }, { transform: 'translateY(-80px) scale(1.2)', opacity: 0 }], { duration: 1100 }).onfinish = () => p.remove();
 }
+function ringFx(x, y) { const r = spawn('ring', x, y); r.animate([{ transform: 'rotate(45deg) scale(.5)', opacity: 1 }, { transform: 'rotate(45deg) scale(4)', opacity: 0 }], { duration: 650, easing: 'ease-out' }).onfinish = () => r.remove(); }
 function modal(html) { const m = $('#modal'); m.innerHTML = `<div class="card">${html}</div>`; m.classList.remove('hidden'); }
-$('#modal').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b) return; const v = b.dataset.m; if (v === 'close') { S.onboarded = true; save(); $('#modal').classList.add('hidden'); } else if (v.startsWith('ob')) onboard(+v.slice(2)); else if (v.startsWith('go:')) { $('#modal').classList.add('hidden'); openNode(v.slice(3)); focusNode(byId[v.slice(3)]); } });
+function closeModal() { clearTimeout(intro._t); $('#modal').classList.add('hidden'); }
+$('#modal').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b) return; const v = b.dataset.m;
+  if (v === 'close') { S.onboarded = true; save(); closeModal(); }
+  else if (v.startsWith('ob')) intro(+v.slice(2));
+  else if (v.startsWith('go:')) { closeModal(); openNode(v.slice(3)); focusNode(byId[v.slice(3)]); } });
 function bossModal(n, rw, fresh) {
-  const nextArc = fresh.length ? ARCS[fresh[0].arc].name : null;
-  modal(`<div class="boss"><div class="big">${n.icon}</div><h2>ROOT DESTROYED!</h2><p><b>${n.name.replace('ROOT: ', '')}</b></p><p>+◉${rw} gold${nextArc ? `<br>New biome: <b>${nextArc}</b>` : ''}</p>${(n.mods || []).map(m => `<div class="buff fx">${m}</div>`).join('')}
-   <div class="actions" style="justify-content:center">${fresh[0] ? `<button class="gold" data-m="go:${fresh[0].id}">▶ ${fresh[0].name}</button>` : ''}<button data-m="close">KEEP CUTTING</button></div></div>`);
+  modal(`<div class="boss"><div class="big">${iconSVG(n.ic, 64)}</div><h2>${n.id === LAUNCH_GATE ? 'GATE OPEN!' : 'ROOT DESTROYED!'}</h2><p><b>${n.name.replace(/^(ROOT|GATE): /, '')}</b></p><p>+${COIN}${rw} gold${fresh.length ? `<br>${fresh.length} new chapter${fresh.length > 1 ? 's' : ''} ready` : ''}</p>${(n.mods || []).map(m => `<div class="buff fx">${m}</div>`).join('')}
+   <div class="actions" style="justify-content:center">${fresh[0] ? `<button class="gold" data-m="go:${fresh[0].id}">▶ ${fresh[0].name}</button>` : ''}<button data-m="close">KEEP GOING</button></div></div>`);
 }
-const OB = [
-  ['🌾', 'CUT YOUR WAY IN', 'Each tile is a playbook chapter hidden in the grass. Tap a glowing tile, read it, and spend <b>◉ gold</b> to cut it open.'],
-  ['◉', 'EARN GOLD BY DOING', 'Gold only comes from tapping <b>DONE-WHEN MET</b> after you hit the real-world outcome. Reading alone pays nothing. Bosses are real milestones like your first paying customer.'],
-  ['🫧', 'WATCH YOUR METERS', '<b>O₂</b> is your runway in months (tap it to edit). It turns red under 6. <b>LAUNCH</b> fills as you finish launch-gate chapters. Follow the yellow <b>▶ NEXT</b> button.']
+// ---------- animated intro (3 steps, ~3s each, skippable) ----------
+const D = (x, y, s, fill, stroke) => `<rect x="${x - s / 2}" y="${y - s / 2}" width="${s}" height="${s}" transform="rotate(45 ${x} ${y})" fill="${fill}" stroke="${stroke}" stroke-width="5" class="border"/>`;
+const ic = (k, x, y, s) => `<g transform="translate(${x - s / 2},${y - s / 2})">${iconSVG(k, s).replace('<svg', `<svg x="0" y="0"`)}</g>`;
+function stage(i) {
+  if (i === 0) { let g = ''; for (let k = 0; k < 14; k++) { const x = 128 + k * 3.4, h = 14 + (k * 7 % 9); g += `<rect class="gb" x="${x}" y="${118 - h}" width="4" height="${h + 6}" fill="${k % 2 ? '#6cd043' : '#3fa535'}" style="--dx:${(k - 7) * 9}px;--dy:${-40 - k * 4}px;--r:${(k - 7) * 40}deg"/>`; }
+    return `<div class="stage s1"><svg viewBox="0 0 300 190">${D(150, 100, 52, '#5f9a3a', '#d8443a')}${ic('magnifier', 150, 100, 30)}${g}<g class="scy">${ic('scythe', 196, 70, 64)}</g></svg></div>`; }
+  if (i === 1) { let c = ''; for (let k = 0; k < 7; k++) c += `<circle class="cn" cx="150" cy="105" r="8" fill="#ffd23a" stroke="#000" stroke-width="2" style="--ox:${(k - 3) * 22}px;--tx:-18px;--ty:-85px;animation-delay:${.5 + k * .12}s"/>`;
+    return `<div class="stage s2"><div class="counter" id="ctr">0</div><svg viewBox="0 0 300 190">${D(150, 105, 52, '#9ad86a', '#ffd23a')}${ic('magnifier', 150, 105, 30)}<g class="tick" style="transform-origin:186px 135px"><rect x="172" y="122" width="34" height="22" fill="#3f8f2c" stroke="#000" stroke-width="3"/><text x="189" y="139" font-family="Press Start 2P" font-size="12" fill="#fff" text-anchor="middle">✔</text></g>${c}</svg></div>`; }
+  return `<div class="stage s3"><svg viewBox="0 0 300 190"><path class="grow" d="M150,140 C120,110 90,100 70,60" fill="none" stroke="#101410" stroke-width="11"/><path class="grow" d="M150,140 C120,110 90,100 70,60" fill="none" stroke="#6fae45" stroke-width="6"/><path class="grow b" d="M150,140 C180,110 210,100 230,60" fill="none" stroke="#101410" stroke-width="11"/><path class="grow b" d="M150,140 C180,110 210,100 230,60" fill="none" stroke="#6fae45" stroke-width="6"/>${D(150, 145, 40, '#b6f070', '#ffd23a')}${ic('magnifier', 150, 145, 22)}<g class="newn a" style="transform-origin:70px 55px">${D(70, 55, 40, '#5f9a3a', '#ffd23a')}${ic('speech', 70, 55, 22)}</g><g class="newn b" style="transform-origin:230px 55px">${D(230, 55, 40, '#5f9a3a', '#ffd23a')}${ic('barchart', 230, 55, 22)}</g></svg></div>`;
+}
+const INTRO = [
+  ['CUT THE GRASS', 'Every tile is a chapter of the playbook. Unlock one to cut it free.'],
+  ['DO IT, GET GOLD', 'Do the real-world goal, then tap <b>I DID IT</b>. Gold only comes from doing.'],
+  ['NEW VINES GROW', 'Clearing chapters opens new ones. Gold borders mean you can unlock it. Follow <b>▶ NEXT</b>.'],
 ];
-function onboard(i) { if (i >= OB.length) { S.onboarded = true; save(); $('#modal').classList.add('hidden'); const nb = nextBest(); if (nb) { openNode(nb.n.id); focusNode(nb.n); } return; } const [ic, t, p] = OB[i];
-  modal(`<div class="big">${ic}</div><h2>${t}</h2><p>${p}</p><div class="steps">${i + 1} / ${OB.length}</div><div class="actions" style="justify-content:center"><button data-m="close">SKIP</button><button class="gold" data-m="ob${i + 1}">${i === OB.length - 1 ? "LET'S CUT ▶" : 'NEXT ▶'}</button></div>`); }
+function intro(i) {
+  clearTimeout(intro._t);
+  if (i >= INTRO.length) { S.onboarded = true; save(); closeModal(); const nb = nextBest(); if (nb) { openNode(nb.n.id); focusNode(nb.n); } return; }
+  const [t, p] = INTRO[i];
+  modal(`${stage(i)}<h2>${t}</h2><p>${p}</p><div class="steps">${INTRO.map((_, k) => `<i class="${k === i ? 'on' : ''}"></i>`).join('')}</div><div class="actions" style="justify-content:center"><button class="ghost" data-m="close">SKIP</button><button class="gold" data-m="ob${i + 1}">${i === INTRO.length - 1 ? "LET'S GO ▶" : 'NEXT ▶'}</button></div>`);
+  if (i === 1) { let v = 0; const el = $('#ctr'); const iv = setInterval(() => { if (!el.isConnected) return clearInterval(iv); v = Math.min(20, v + 3); el.textContent = v; if (v >= 20) clearInterval(iv); }, 160); setTimeout(() => {}, 0); }
+  if (i < INTRO.length - 1) intro._t = setTimeout(() => { if (!$('#modal').classList.contains('hidden')) intro(i + 1); }, 3300);
+}
 
-setTop(); renderFilters(); renderTree(); fit();
-if (!S.onboarded) onboard(0);
-window.__og = { get state() { return S; } };
+$('.title').innerHTML = iconSVG('scythe', 26) + '<span>OVERGROWTH<small>the solo founder skill tree</small></span>';
+setTop(); renderFilters(); renderTree(); home();
+if (!S.onboarded) intro(0);
+window.__og = { get state() { return S; }, status: id => status(byId[id]), open: id => { openNode(id); focusNode(byId[id]); } };
 })();
