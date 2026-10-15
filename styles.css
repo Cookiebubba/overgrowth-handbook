@@ -106,8 +106,9 @@ body.meadow #legend{bottom:32px}body.meadow .nextbtn{bottom:34px}
 #coinpill{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;z-index:42;
   background:#1a1d16;border:3px solid #000;box-shadow:inset 0 0 0 2px #3c4a2c;padding:3px 18px 3px 4px;font-family:'Press Start 2P';font-size:16px;color:var(--gold);text-shadow:2px 2px 0 #6b4a00;pointer-events:none}
 #coinpill .pc{width:30px;height:30px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff3a0 0 18%,#ffd23a 19% 62%,#c48a00 63%);border:3px solid #000;margin-left:-14px}
-#coinpill.pop{animation:pop .35s}
-@keyframes pop{40%{transform:translateX(-50%) scale(1.25)}}
+#coinpill{transform:translateX(-50%) scale(var(--bulge,1));filter:drop-shadow(0 0 var(--glow,0px) #ffd23a);transition:transform .12s ease-out,filter .2s}
+#coinpill.pop{animation:pop .42s}
+@keyframes pop{0%{transform:translateX(-50%) scale(1.3)}35%{transform:translateX(-50%) scale(1.45);filter:drop-shadow(0 0 26px #fff3a0)}100%{transform:translateX(-50%) scale(1)}}
 #legend{position:absolute;left:10px;bottom:10px;display:flex;gap:12px;font-size:16px;color:#ecebdc;background:#141410d8;padding:5px 9px;border:2px solid #000;flex-wrap:wrap;z-index:4;align-items:center}
 .lg{display:inline-block;width:11px;height:11px;margin-right:5px;vertical-align:middle;transform:rotate(45deg);background:#5f9a3a;border:2px solid}
 .lg.ok{border-color:var(--gold)}.lg.no{border-color:var(--red)}.lg.done{background:var(--lime);border-color:var(--gold)}
@@ -238,3 +239,7 @@ input[type=text],input[type=search],input[type=number],textarea{cursor:text}
 #viewport .node{cursor:url(cursors/pointer.png) 11 1,pointer;cursor:-webkit-image-set(url(cursors/pointer.png) 1x,url(cursors/pointer@2x.png) 2x) 11 1,pointer;cursor:image-set(url(cursors/pointer.png) 1x,url(cursors/pointer@2x.png) 2x) 11 1,pointer}
 #viewport.drag,#viewport.drag *{cursor:url(cursors/grabbing.png) 15 15,grabbing;cursor:-webkit-image-set(url(cursors/grabbing.png) 1x,url(cursors/grabbing@2x.png) 2x) 15 15,grabbing;cursor:image-set(url(cursors/grabbing.png) 1x,url(cursors/grabbing@2x.png) 2x) 15 15,grabbing}
 #btn-music.off{opacity:.55;text-decoration:line-through}
+
+.pflash{position:fixed;width:60px;height:60px;border-radius:50%;background:radial-gradient(circle,#fffbe0 0 25%,#ffd23acc 45%,#ffd23a00 70%);pointer-events:none}
+.plus.big{position:fixed;white-space:nowrap;z-index:2}
+.spark{position:absolute;width:6px;height:6px;background:#fff3a0;box-shadow:0 0 0 2px #ffd23a88;pointer-events:none}

@@ -127,15 +127,15 @@ const SFX = { cut: [[220, .05, 'sawtooth'], [440, .06], [660, .08]], coin: [[988
 const SAMPLE = new Map([[SFX.tap, ['click', .35]], [SFX.cut, ['swoosh', .7]], [SFX.boss, ['fanfare', .5]], [SFX.nope, ['error', .4]], [SFX.coin, ['coin', .35]]]);
 function beep(seq) { if (!S.sound) return; const sm = SAMPLE.get(seq); if (sm && play(sm[0], sm[1])) return; let at = 0; for (const [f, d, type] of seq) { tone(f, d, type || 'square', .06, at); at += d * .8; } }
 function burstSfx(big) { duck(); if (play('spill', big ? .9 : .75)) return; noise(big ? .28 : .16, big ? .16 : .11); tone(big ? 520 : 680, big ? .2 : .12, 'square', .07, 0, 90); if (big) tone(260, .25, 'triangle', .08, .02, 60); }
-// coin landing: a short clink per coin, pitch nudged upward; rate-limited so a swarm doesn't get noisy
+// coin landing: a short clink per coin, rising a semitone each (capped at an octave); rate-limited so a swarm doesn't get noisy
 const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31];
 let lastClink = 0, clinkStep = 0;
 function clinkSfx(reset) {
   if (reset) { clinkStep = 0; return; }
   const now = performance.now(), slot = Math.max(now, lastClink + 48); if (slot - now > 260) return; lastClink = slot; // queue into 48ms slots; drop only if far behind
-  const st = PENTA[Math.min(clinkStep++, 5)], at = (slot - now) / 1000;
-  if (play('coin', .34, Math.pow(2, st / 48), at)) return; // real coin clink into the counter, nudged up a little per coin (max +3 semitones)
-  const f = 1046.5 * Math.pow(2, PENTA[Math.min(clinkStep - 1, PENTA.length - 1)] / 12);
+  const st = Math.min(clinkStep++, 12), at = (slot - now) / 1000;
+  if (play('coin', .34 * (1 - st / 40), Math.pow(2, st / 12), at)) return; // clink into the counter, one semitone higher per coin, held at an octave so a long pour builds
+  const f = 1046.5 * Math.pow(2, (clinkStep - 1) / 12);
   tone(f, .05, 'square', .045, at); tone(f * 1.5, .09, 'square', .03, at + .035);
 }
 function kachingSfx() { if (!play('kaching', .62, 1, .03)) { tone(1046.5, .08, 'square', .05, .04); tone(1568, .18, 'square', .04, .1); } }
@@ -271,7 +271,7 @@ function clear(n, credited) {
   const [x, y] = fxAt(n); cutFx(x, y); coinFx(x, y, rw, n.tier === 'root'); bumpNode(n);
   const fresh = SKILLS.filter(k => status(k) === 'avail' && !before.has(k.id));
   fresh.forEach((k, i) => setTimeout(() => { const [a, b] = fxAt(k); ringFx(a, b); }, 350 + i * 90));
-  if (n.tier === 'root') { shake(); beep(SFX.boss); setTimeout(() => bossModal(n, rw, fresh), 450); }
+  if (n.tier === 'root') { beep(SFX.boss); setTimeout(() => bossModal(n, rw, fresh), 450); }
   else { coinRun.msg = `+${COIN}${rw}${fresh.length ? ` · ${fresh.length} new chapter${fresh.length > 1 ? 's' : ''} ready` : ''}`; } // shown once the last coin lands, so the toast never covers the meter mid-flight
 }
 $('#panel').addEventListener('click', e => {
@@ -379,35 +379,66 @@ const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matche
 const COINSVG = '<svg viewBox="0 0 8 8" shape-rendering="crispEdges"><path fill="#000" d="M2 0h4v1h1v1h1v4h-1v1h-1v1h-4v-1h-1v-1h-1v-4h1v-1h1z"/><path fill="#c48a00" d="M2 1h4v1h1v4h-1v1h-4v-1h-1v-4h1z"/><path fill="#ffd23a" d="M2 1h3v1h1v3h-1v1h-3v-1h-1v-3h1z"/><path fill="#fff3a0" d="M2 2h1v2h-1z"/><path fill="#c48a00" d="M4 2h1v3h-1z"/></svg>';
 function finishCoinRun() { if (!coinRun) return; if (coinRun.msg) toast(coinRun.msg); shownGold = coinRun.to; coinRun = null; $('#gold').textContent = S.gold; }
 function coinTarget() { const g = $('#coinpill').getBoundingClientRect(), c = $('#coinpill .pc').getBoundingClientRect(); return [c.width ? c.left + c.width / 2 : g.left + 20, (c.height ? c.top + c.height / 2 : g.top + g.height / 2)]; }
+// payout drama: 0 for small payouts (10-20 gold), ~0.5 at 70, 1 for 120+ and boss clears
+const coinHeat = (amt, big) => Math.max(big ? .9 : 0, Math.min(1, Math.max(0, (amt - 20) / 100)));
+function pillHeat(run) { // the meter bulges and glows a little more with every coin that lands
+  const pill = $('#coinpill'), k = run.n ? run.landed / run.n : 1, h = run.heat || 0;
+  if (reduceMotion()) return;
+  pill.style.setProperty('--bulge', (1 + k * (.08 + .22 * h)).toFixed(3));
+  pill.style.setProperty('--glow', (k * (6 + 22 * h)).toFixed(1) + 'px');
+}
+function pillFinale(run) {
+  const pill = $('#coinpill'), r = pill.getBoundingClientRect(), [cx, cy] = coinTarget(), h = run.heat || 0;
+  pill.style.removeProperty('--bulge'); pill.style.removeProperty('--glow');
+  pill.classList.remove('pop'); void pill.offsetWidth; pill.classList.add('pop');
+  if (reduceMotion()) return;
+  const f = spawn('pflash', cx, cy); const sz = 1.6 + 2.2 * h;
+  f.animate([{ transform: 'translate(-50%,-50%) scale(.3)', opacity: .95 }, { transform: `translate(-50%,-50%) scale(${sz})`, opacity: 0 }], { duration: 380 + 220 * h, easing: 'ease-out' }).onfinish = () => f.remove();
+  const amt = run.to - run.from, p = spawn('plus big', r.left + r.width / 2, r.bottom + 6, `+${amt}`);
+  p.style.fontSize = (16 + 10 * h) + 'px';
+  p.animate([{ transform: 'translate(-50%,0) scale(.4)', opacity: 0 }, { transform: 'translate(-50%,6px) scale(1.35)', opacity: 1, offset: .25 }, { transform: 'translate(-50%,10px) scale(1)', opacity: 1, offset: .7 }, { transform: 'translate(-50%,14px) scale(1)', opacity: 0 }], { duration: 1000 + 300 * h, easing: 'ease-out' }).onfinish = () => p.remove();
+}
 function coinLand(run) {
   if (run !== coinRun) return; run.landed++;
   const v = run.landed >= run.n ? run.to : Math.round(run.from + (run.to - run.from) * run.landed / run.n);
   $('#gold').textContent = v;
-  const pill = $('#coinpill'); pill.classList.remove('hit'); void pill.offsetWidth; pill.classList.add('hit');
+  const pill = $('#coinpill'); pill.classList.remove('hit'); void pill.offsetWidth; pill.classList.add('hit'); pillHeat(run);
   clinkSfx();
-  if (run.landed >= run.n) { kachingSfx(); if (run.msg) setTimeout(() => toast(run.msg), 250); shownGold = run.to; coinRun = null; pill.classList.remove('pop'); void pill.offsetWidth; pill.classList.add('pop'); renderHud(); }
+  if (run.landed >= run.n) { kachingSfx(); if (run.msg) setTimeout(() => toast(run.msg), 250); shownGold = run.to; coinRun = null; pillFinale(run); renderHud(); }
 }
+function burstNudge(h) {
+  if (reduceMotion()) return; const a = 2 + 2 * h, d = 150 + 50 * h;
+  world.animate([{ translate: '0 0' }, { translate: `${-a}px ${a * .6}px` }, { translate: `${a * .8}px ${-a * .5}px` }, { translate: `${-a * .4}px ${-a * .3}px` }, { translate: '0 0' }], { duration: d, easing: 'linear' });
+}
+function sparkle(x, y, h) { const s = spawn('spark', x, y); s.animate([{ transform: 'translate(-50%,-50%) scale(1)', opacity: .95 }, { transform: `translate(-50%,-50%) translateY(${4 + 6 * h}px) scale(.2)`, opacity: 0 }], { duration: 260 + 140 * h, easing: 'ease-out' }).onfinish = () => s.remove(); }
 function coinFx(x, y, amt, big) {
   const run = coinRun || { from: S.gold - amt, to: S.gold, n: 0, landed: 0 }; coinRun = run;
-  const N = reduceMotion() ? 5 : Math.round(Math.min(big ? 20 : 14, (big ? 12 : 8) + amt / 25));
-  run.n = N; clinkSfx(true); burstSfx(big);
-  const p = spawn('plus', x - 30, y - 50, `+${amt}`); p.animate([{ transform: 'translateY(0) scale(.6)', opacity: 1 }, { transform: 'translateY(-50px) scale(1.5)', opacity: 1, offset: .5 }, { transform: 'translateY(-80px) scale(1.2)', opacity: 0 }], { duration: 1100 }).onfinish = () => p.remove();
-  setTimeout(() => { if (coinRun === run) { finishCoinRun(); renderHud(); } }, 4000); // safety net (e.g. tab hidden, rAF paused)
+  const h = coinHeat(amt, big), maxN = isMobile() ? 24 : 36;
+  const N = reduceMotion() ? 5 : h > 0 ? Math.round(12 + (maxN - 12) * h) : Math.round(Math.min(14, 8 + amt / 25));
+  run.n = N; run.heat = h; clinkSfx(true); burstSfx(big || h > .5);
+  setTimeout(() => { if (coinRun === run) { finishCoinRun(); renderHud(); } }, 5000); // safety net (e.g. tab hidden, rAF paused)
   if (reduceMotion()) { // simple version: no explosion, coins glide straight to the meter
     const [gx, gy] = coinTarget();
     for (let i = 0; i < N; i++) { const c = spawn('coinfx', x - 9, y - 9, COINSVG);
       c.animate([{ transform: 'translate(0,0)', opacity: 0 }, { opacity: 1, offset: .2 }, { transform: `translate(${gx - x}px,${gy - y}px)`, opacity: 1 }], { duration: 520, delay: i * 90, easing: 'ease-in', fill: 'backwards' }).onfinish = () => { c.remove(); coinLand(run); }; }
     return;
   }
-  const coins = [];
+  const p = spawn('plus', x - 30, y - 50, `+${amt}`); p.style.fontSize = (15 + 9 * h) + 'px';
+  p.animate([{ transform: 'translateY(0) scale(.6)', opacity: 1 }, { transform: `translateY(${-50 - 30 * h}px) scale(${1.5 + .4 * h})`, opacity: 1, offset: .5 }, { transform: `translateY(${-80 - 40 * h}px) scale(1.2)`, opacity: 0 }], { duration: 1100 + 300 * h }).onfinish = () => p.remove();
+  burstNudge(h); // very light shake on the burst, a touch stronger for big payouts
+  const coins = [], spd0 = 540 + 360 * h, spdR = 420 + 420 * h, spread = Math.PI * (1.7 - .25 * h);
   for (let i = 0; i < N; i++) {
-    const a = -Math.PI / 2 + (Math.random() - .5) * Math.PI * 1.7, sp = (big ? 700 : 540) + Math.random() * (big ? 600 : 420); // mostly upward, any direction
+    const a = -Math.PI / 2 + (Math.random() - .5) * spread, sp = spd0 + Math.random() * spdR; // mostly upward, higher when the payout is big
     const el = spawn('coinfx', 0, 0, COINSVG);
-    coins.push({ el, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 120, spin: Math.random() * 6, sv: (Math.random() < .5 ? -1 : 1) * (10 + Math.random() * 10), sc: .7 + Math.random() * .5, hold: .42 + i * .035 + Math.random() * .08, t: 0, done: false });
+    coins.push({ el, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 120 - 160 * h, spin: Math.random() * 6, sv: (Math.random() < .5 ? -1 : 1) * (10 + Math.random() * 10), sc: .7 + Math.random() * .5 + .15 * h, hold: .42 + i * (.035 - .012 * h) + Math.random() * .08, t: 0, done: false, ls: 0 });
   }
-  let last = performance.now();
+  // brief slow-mo hang right after the burst for big payouts (wall time: 0.1 s at full speed, then ~150-250 ms at ~30%, easing back)
+  const hang = h > 0 ? .15 + .1 * h : 0, t0 = performance.now();
+  const rate = el => { if (!hang) return 1; const e = (el - t0) / 1000; if (e < .1) return 1; if (e < .1 + hang) return .3; if (e < .2 + hang) return .3 + .7 * (e - .1 - hang) / .1; return 1; };
+  const sparkEvery = h > 0 ? .07 - .03 * h : .12;
+  let last = t0;
   const step = now => {
-    const dt = Math.min(.033, (now - last) / 1000); last = now; const [gx, gy] = coinTarget(); let alive = 0;
+    const dt = Math.min(.033, (now - last) / 1000) * rate(now); last = now; const [gx, gy] = coinTarget(); let alive = 0;
     for (const c of coins) { if (c.done) continue; alive++; c.t += dt;
       if (c.t < c.hold) { // burst + drag: fast out, then decelerate and hang in the air with a little float down
         const k = Math.exp(-5.8 * dt); c.vx *= k; c.vy = c.vy * k + 260 * dt;
@@ -417,6 +448,7 @@ function coinFx(x, y, amt, big) {
         const spd = Math.hypot(c.vx, c.vy), st = Math.min(1, 7 * dt); c.vx += (ux * spd - c.vx) * st; c.vy += (uy * spd - c.vy) * st;
         if (d < 18 || (c.vx * dx + c.vy * dy < 0 && d < 60) || ht > 1.6) { c.done = true; c.el.remove(); coinLand(run); continue; }
         c.sc = Math.max(.55, c.sc - dt * .5);
+        if ((c.ls += dt) > sparkEvery) { c.ls = 0; sparkle(c.x, c.y, h); } // shimmer trail while homing
       }
       c.x += c.vx * dt; c.y += c.vy * dt; c.spin += c.sv * dt;
       c.el.style.transform = `translate3d(${(c.x - 10).toFixed(1)}px,${(c.y - 10).toFixed(1)}px,0) scale(${(Math.cos(c.spin) * c.sc).toFixed(3)},${c.sc.toFixed(3)})`;
