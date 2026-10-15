@@ -1,0 +1,62 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;width:1200px;height:630px;overflow:hidden;background:#232326}
+#c{position:relative;width:1200px;height:630px;overflow:hidden;
+ background:radial-gradient(ellipse 520px 260px at 600px 300px,#2e2e33 0,#232326 70%),#232326}
+#c::before{content:'';position:absolute;inset:0;background-image:linear-gradient(#ffffff06 2px,transparent 2px),linear-gradient(90deg,#ffffff06 2px,transparent 2px);background-size:24px 24px}
+.sky{position:absolute;left:0;right:0;top:0;height:22px;background:linear-gradient(#4cb8f5,#aee6ff);border-bottom:4px solid #141410}
+.cloud{position:absolute;top:5px;height:8px;background:#fff;box-shadow:0 0 0 2px #fff}
+svg.v{position:absolute;inset:0}
+.v-out{fill:none;stroke:#101410;stroke-linecap:round}
+.tile{position:absolute;width:96px;height:96px;margin:-48px 0 0 -48px}
+.tile .dia{position:absolute;inset:14px;transform:rotate(45deg);background:linear-gradient(135deg,#7fbf55,#4f8f35);box-shadow:0 0 0 4px #141410,0 0 0 9px var(--bc),0 0 0 13px #141410}
+.tile.no .dia{background:linear-gradient(135deg,#557a45,#38552c)}
+.tile.done .dia{background:linear-gradient(135deg,#b6f070,#6cbf3c);box-shadow:0 0 0 4px #141410,0 0 0 9px #ffd23a,0 0 0 13px #141410,0 0 26px 10px #ffd23a55}
+.tile.ok{--bc:#ffd23a}.tile.no{--bc:#d8443a}
+.tile .ic{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+.tile.no .ic{opacity:.8}
+.tile.sm{width:72px;height:72px;margin:-36px 0 0 -36px}.tile.sm .dia{inset:11px;box-shadow:0 0 0 3px #141410,0 0 0 7px var(--bc),0 0 0 10px #141410}
+.title{position:absolute;left:0;right:0;top:214px;text-align:center}
+.logo{display:inline-flex;align-items:center;gap:22px;font-family:'Press Start 2P';font-size:70px;color:#a8ec5a;letter-spacing:2px;
+ text-shadow:5px 5px 0 #1f4d17,10px 10px 0 #101410}
+.sub{margin-top:30px;font-family:'Press Start 2P';font-size:20px;color:#fff7dc;text-shadow:3px 3px 0 #101410;letter-spacing:1px}
+.plate{position:absolute;left:50%;top:186px;width:860px;height:206px;margin-left:-430px;background:#1a1a1dcc;border:4px solid #101410;box-shadow:inset 0 0 0 3px #3c4a2c,8px 8px 0 #0008}
+.pill{position:absolute;left:50%;top:430px;transform:translateX(-50%);display:flex;align-items:center;gap:14px;background:#1a1d16;border:4px solid #000;box-shadow:inset 0 0 0 3px #3c4a2c;padding:6px 22px 6px 8px;font-family:'Press Start 2P';font-size:17px;color:#ffd23a;text-shadow:2px 2px 0 #6b4a00;white-space:nowrap}
+.pill b{font-size:12px;color:#a8ec5a;text-shadow:2px 2px 0 #101410;margin:0 -2px}
+.pc{width:34px;height:34px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff3a0 0 18%,#ffd23a 19% 62%,#c48a00 63%);border:3px solid #000}
+.grass{position:absolute;left:0;right:0;bottom:0;height:64px;background:#3fa535;border-top:4px solid #141410}
+.grass svg{position:absolute;left:0;top:-30px}
+.coin{position:absolute;width:26px;height:26px}
+</style></head><body><div id="c">
+<div class="sky"></div><div class="cloud" style="left:150px;width:46px"></div><div class="cloud" style="left:980px;width:60px"></div><div class="cloud" style="left:560px;width:34px"></div>
+<svg class="v" id="vines" width="1200" height="630"></svg>
+<div id="tiles"></div>
+<div class="plate"></div>
+<div class="title"><div class="logo"><span id="scy"></span>OVERGROWTH</div><div class="sub">A skill tree handbook for solo founders</div></div>
+<div class="pill"><span class="pc"></span>IDEA<b>▶</b>LAUNCH<b>▶</b>BOOTSTRAP OR VC</div>
+<div class="grass"><svg id="blades" width="1200" height="40"></svg></div>
+<div id="coins"></div>
+</div>
+<script src="../../icons.js"></script>
+<script>
+// tiles: [x,y,icon,state,size]
+const T=[[96,120,'sprout','done'],[250,92,'magnifier','done'],[96,300,'speech','ok'],[250,470,'flask','no','sm'],[100,486,'barchart','no','sm'],
+ [1104,120,'rocket','no'],[950,92,'coin','ok'],[1104,300,'tag','no'],[950,470,'megaphone','ok','sm'],[1100,486,'trophy','no','sm'],[420,70,'hammer','ok','sm'],[780,70,'flag','no','sm']];
+const E=[[0,1],[0,2],[2,3],[2,4],[1,10],[10,11],[11,6],[6,5],[6,7],[7,8],[7,9]];
+let h=7;const rnd=()=>{h=(h*16807)%2147483647;return h/2147483647};
+let d='',thorn='',dl='';
+for(const [a,b] of E){const p=T[a],q=T[b],dx=q[0]-p[0],dy=q[1]-p[1],L=Math.hypot(dx,dy),nx=-dy/L,ny=dx/L,w=(rnd()-.5)*L*.25;
+ const c1=[p[0]+dx*.33+nx*w,p[1]+dy*.33+ny*w],c2=[p[0]+dx*.66-nx*w,p[1]+dy*.66-ny*w];
+ const path=`M${p[0]},${p[1]} C${c1} ${c2} ${q[0]},${q[1]}`; const lit=p[3]==='done'&&q[3]!=='no'; (lit?(dl+=path):(d+=path));
+ const bz=t=>{const u=1-t;return[0,1].map(i=>u*u*u*p[i]+3*u*u*t*c1[i]+3*u*t*t*c2[i]+t*t*t*q[i])};
+ const k=Math.floor(L/24);for(let i=1;i<k;i++){const t=i/k,[x,y]=bz(t),[x2,y2]=bz(t+.01),tl=Math.hypot(x2-x,y2-y),ux=(x2-x)/tl,uy=(y2-y)/tl,s=i%2?1:-1,px=-uy*s,py=ux*s;
+  thorn+=`M${x-ux*3},${y-uy*3}L${x+px*13+ux*3},${y+py*13+uy*3}L${x+ux*3},${y+uy*3}Z`;}}
+vines.innerHTML=`<path class="v-out" d="${d}" stroke-width="14"/><path d="${d}" fill="none" stroke="#4f7a36" stroke-width="7" stroke-linecap="round"/><path class="v-out" d="${dl}" stroke-width="14"/><path d="${dl}" fill="none" stroke="#a8ec5a" stroke-width="7" stroke-linecap="round"/><path d="${thorn}" fill="#101410"/>`;
+tiles.innerHTML=T.map(([x,y,ic,st,sz])=>`<div class="tile ${st} ${sz||''}" style="left:${x}px;top:${y}px"><div class="dia"></div><div class="ic">${iconSVG(ic,sz?30:40)}</div></div>`).join('');
+scy.innerHTML=iconSVG('scythe',78);
+let b='';for(let x=0;x<1200;x+=6){const hh=12+((x*37)%23);b+=`<rect x="${x}" y="${40-hh}" width="6" height="${hh}" fill="${(x/6)%2?'#6cd043':'#3fa535'}"/><rect x="${x}" y="${40-hh}" width="6" height="3" fill="#101410" opacity=".35"/>`;}
+blades.innerHTML=b;
+const C=[[330,520],[372,548],[860,530],[820,556],[175,388],[1022,392]];
+coins.innerHTML=C.map(([x,y])=>`<div class="coin" style="left:${x}px;top:${y}px">${iconSVG('coin',26)}</div>`).join('');
+</script></body></html>

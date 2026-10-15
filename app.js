@@ -31,10 +31,12 @@ const EFFECTS = {
 };
 
 let S = load();
-function fresh() { return { gold: 0, unlocked: { 'founder-mode': 1 }, done: {}, credit: {}, runway: 6, swings: { week: weekKey(), active: [] }, filter: Object.keys(ARCS), sound: false, onboarded: false, harvest: today(), theme: 'meadow' }; }
-function load() { try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.unlocked && s.done) return Object.assign(fresh(), s); } catch (e) {} return fresh(); }
+function fresh() { return { gold: 0, unlocked: { 'founder-mode': 1 }, done: {}, credit: {}, runway: 6, swings: { week: weekKey(), active: [] }, filter: Object.keys(ARCS), sound: true, sv: 2, onboarded: false, harvest: today(), theme: 'meadow' }; }
+function load() { try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.unlocked && s.done) { const o = Object.assign(fresh(), s); if (s.sv !== 2) { o.sound = true; o.sv = 2; o._migrated = 1; } return o; } } catch (e) {} return fresh(); }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
 if (S.swings.week !== weekKey()) S.swings = { week: weekKey(), active: [] };
+// settings v2: sound is ON by default. Older saves were muted by the old default, so switch them on once; a later mute sticks.
+if (S._migrated) { delete S._migrated; save(); }
 document.body.className = S.theme === 'classic' ? 'classic' : 'meadow';
 
 const activeFx = () => Object.entries(EFFECTS).filter(([id]) => S.done[id]).map(([id, e]) => ({ id, ...e }));
@@ -61,10 +63,43 @@ function nextBest() {
 }
 (function harvest() { const days = Math.min(7, Math.floor((Date.parse(today()) - Date.parse(S.harvest || today())) / 864e5)); const per = activeFx().reduce((a, e) => a + (e.daily || 0), 0); if (days > 0 && per) { S.gold += days * per; setTimeout(() => toast(`Evergreen content paid out: +${COIN}${days * per}`), 900); } S.harvest = today(); save(); })();
 
-// ---------- sound ----------
-let ac = null;
-function beep(seq) { if (!S.sound) return; try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); let t = ac.currentTime; for (const [f, d, type] of seq) { const o = ac.createOscillator(), g = ac.createGain(); o.type = type || 'square'; o.frequency.value = f; g.gain.setValueAtTime(.06, t); g.gain.exponentialRampToValueAtTime(.001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d); t += d * .8; } } catch (e) {} }
+// ---------- sound (8-bit WebAudio; context starts on the first user gesture) ----------
+let ac = null, noiseBuf = null;
+function audio() {
+  if (!S.sound) return null;
+  try {
+    if (!ac) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; ac = new AC(); }
+    if (ac.state === 'suspended') ac.resume();
+    return ac;
+  } catch (e) { return null; }
+}
+// Browsers block audio until a gesture: unlock on the first tap/click/key anywhere (a tap on a tile counts).
+const unlockAudio = () => { const a = audio(); if (a && a.state !== 'running') a.resume(); };
+['pointerdown', 'touchend', 'keydown'].forEach(ev => window.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
+function tone(f, d, type = 'square', vol = .06, at = 0, f2) {
+  const a = audio(); if (!a) return; const t = a.currentTime + at, o = a.createOscillator(), g = a.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0008, t + d);
+  o.connect(g).connect(a.destination); o.start(t); o.stop(t + d + .02);
+}
+function noise(d, vol = .12, at = 0, hp = 900) {
+  const a = audio(); if (!a) return; const t = a.currentTime + at;
+  if (!noiseBuf) { noiseBuf = a.createBuffer(1, a.sampleRate * .5, a.sampleRate); const ch = noiseBuf.getChannelData(0); let last = 0; for (let i = 0; i < ch.length; i++) { if (i % 3 === 0) last = Math.random() * 2 - 1; ch[i] = last; } } // sample-and-hold = crunchy 8-bit noise
+  const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain(); src.buffer = noiseBuf; f.type = 'highpass'; f.frequency.value = hp;
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0008, t + d); src.connect(f).connect(g).connect(a.destination); src.start(t); src.stop(t + d + .02);
+}
+function beep(seq) { if (!S.sound) return; let at = 0; for (const [f, d, type] of seq) { tone(f, d, type || 'square', .06, at); at += d * .8; } }
 const SFX = { cut: [[220, .05, 'sawtooth'], [440, .06], [660, .08]], coin: [[988, .06], [1319, .14]], boss: [[523, .1], [659, .1], [784, .1], [1047, .3]], nope: [[160, .15, 'sawtooth']], tap: [[700, .03]] };
+function burstSfx(big) { noise(big ? .28 : .16, big ? .16 : .11); tone(big ? 520 : 680, big ? .2 : .12, 'square', .07, 0, 90); if (big) tone(260, .25, 'triangle', .08, .02, 60); }
+// coin clink: two quick square blips, pitch climbs a pentatonic step per coin; rate-limited so a swarm doesn't get noisy
+const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31];
+let lastClink = 0, clinkStep = 0;
+function clinkSfx(reset) {
+  if (reset) { clinkStep = 0; return; }
+  const now = performance.now(), slot = Math.max(now, lastClink + 48); if (slot - now > 260) return; lastClink = slot; // queue into 48ms slots; drop only if far behind
+  const f = 1046.5 * Math.pow(2, PENTA[Math.min(clinkStep++, PENTA.length - 1)] / 12), at = (slot - now) / 1000;
+  tone(f, .05, 'square', .045, at); tone(f * 1.5, .09, 'square', .03, at + .035);
+}
 
 // ---------- tree ----------
 const vp = $('#viewport'), world = $('#world'), nodesEl = $('#nodes'), svg = $('#vines');
@@ -120,7 +155,7 @@ function renderTree() {
   $('#next').textContent = nb ? `▶ NEXT · ${nb.verb}: ${nb.n.name.replace(/^(ROOT|GATE): /, '')}` : (Object.keys(S.done).length === SKILLS.length ? '🏆 FIELD CLEARED' : '');
   renderHud();
 }
-const STLABEL = { done: '✔ Cleared', unlocked: 'In progress: do the goal, then tap "I did it"', avail: 'Ready to unlock', locked: 'Locked', forked: 'You picked the other path' };
+const STLABEL = { done: '✔ Cleared', unlocked: 'Started: do the goal, then tap "I did it"', avail: 'Ready to unlock', locked: 'Locked', forked: 'You picked the other path' };
 nodesEl.addEventListener('mouseover', e => { const el = e.target.closest('.node'); if (!el || isMobile()) return; const n = byId[el.dataset.id], st = status(n);
   const t = $('#tip'); const miss = st === 'locked' ? missing(n) : [];
   t.innerHTML = `<b>${esc(n.name)}</b>${esc(n.what)}<span class="st">${STLABEL[st]}${st === 'avail' ? ` · costs ${COIN}${n.cost}` : ''}${miss.length ? '<br>Needs: ' + esc(miss.join('; ')) : ''}</span>`;
@@ -129,12 +164,13 @@ nodesEl.addEventListener('mouseover', e => { const el = e.target.closest('.node'
 nodesEl.addEventListener('mouseout', e => { if (e.target.closest('.node')) $('#tip').classList.add('hidden'); });
 
 // ---------- HUD ----------
-let shownGold = S.gold;
+let shownGold = S.gold, coinRun = null;
 function effRunway() { let r = Number(S.runway) || 0; for (const e of activeFx()) r += e.runway || 0; if (activeFx().some(e => e.drainX)) r = r / 2; return Math.round(r * 10) / 10; }
 function gateProgress() { const g = byId[LAUNCH_GATE]; const parts = [...g.all.map(r => [r]), ...g.any]; return { done: parts.filter(p => p.some(r => S.done[r])).length, total: parts.length, parts }; }
 function renderHud() {
   const gEl = $('#gold');
-  if (shownGold !== S.gold) { const from = shownGold, to = S.gold, t0 = performance.now(); shownGold = to; const pill = $('#coinpill'); pill.classList.remove('pop'); void pill.offsetWidth; pill.classList.add('pop');
+  if (coinRun) { /* coins in flight tick the counter as they land */ }
+  else if (shownGold !== S.gold) { const from = shownGold, to = S.gold, t0 = performance.now(); shownGold = to; const pill = $('#coinpill'); pill.classList.remove('pop'); void pill.offsetWidth; pill.classList.add('pop');
     const step = t => { const k = Math.min(1, (t - t0) / 700); gEl.textContent = Math.round(from + (to - from) * k); if (k < 1) requestAnimationFrame(step); }; requestAnimationFrame(step);
   } else gEl.textContent = S.gold;
   const r = effRunway(), safe = activeFx().some(e => e.noDrain), bar = $('#o2bar');
@@ -162,7 +198,7 @@ function openNode(id) {
   const credit = `<button class="ghost" data-a="credit">I'VE ALREADY DONE THIS · +${COIN}${rw}</button>`;
   let act = '';
   if (st === 'avail' && !n.cost) act = `<button class="gold" data-a="done">✔ I DID IT · +${COIN}${rw}</button><span class="hint-line">Milestones are free to claim once you've really done them.</span>`;
-  else if (st === 'avail') act = `<button class="gold" data-a="unlock">UNLOCK · ${COIN}${n.cost}</button>${credit}${S.gold < n.cost ? `<span class="hint-line">You have ${COIN}${S.gold}. Clear a chapter you've started to earn more.</span>` : ''}`;
+  else if (st === 'avail') act = `<button class="gold" data-a="unlock">UNLOCK · ${COIN}${n.cost}</button>${credit}${S.gold < n.cost ? `<span class="hint-line">You have ${COIN}${S.gold}. Finish a chapter you've started to earn more.</span>` : ''}`;
   if (st === 'unlocked') act = `<button class="gold" data-a="done">✔ I DID IT · +${COIN}${rw}</button><button data-a="swing">${swinging ? 'REMOVE FROM THIS WEEK' : '+ ADD TO THIS WEEK'}</button>`;
   if (st === 'done') act = `<span class="tag req y">✔ CLEARED${S.credit[id] ? ' (credited)' : ''}</span><button class="ghost" data-a="undo">UNDO</button>`;
   if (n.excl && (st === 'unlocked' || st === 'done')) act += `<button class="danger" data-a="replant">CHANGE MY MIND</button>`;
@@ -190,16 +226,18 @@ function openNode(id) {
 function fxAt(n) { const el = nodesEl.querySelector(`[data-id="${n.id}"]`); if (!el) return [innerWidth / 2, innerHeight / 2]; const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
 function clear(n, credited) {
   const rw = reward(n) + ((EFFECTS[n.id] || {}).bonus || 0); const before = new Set(SKILLS.filter(k => status(k) === 'avail').map(k => k.id));
+  finishCoinRun(); coinRun = { from: S.gold, to: S.gold + rw, n: 0, landed: 0 };
   S.done[n.id] = 1; S.unlocked[n.id] = 1; if (credited) S.credit[n.id] = 1; S.gold += rw; S.swings.active = S.swings.active.filter(x => x !== n.id); save(); renderTree();
-  const [x, y] = fxAt(n); cutFx(x, y); coinFx(x, y, rw); bumpNode(n); beep(SFX.coin);
+  const [x, y] = fxAt(n); cutFx(x, y); coinFx(x, y, rw, n.tier === 'root'); bumpNode(n);
   const fresh = SKILLS.filter(k => status(k) === 'avail' && !before.has(k.id));
   fresh.forEach((k, i) => setTimeout(() => { const [a, b] = fxAt(k); ringFx(a, b); }, 350 + i * 90));
   if (n.tier === 'root') { shake(); beep(SFX.boss); setTimeout(() => bossModal(n, rw, fresh), 450); }
-  else toast(`+${COIN}${rw}${fresh.length ? ` · ${fresh.length} new chapter${fresh.length > 1 ? 's' : ''} ready` : ''}`);
+  else { const msg = `+${COIN}${rw}${fresh.length ? ` · ${fresh.length} new chapter${fresh.length > 1 ? 's' : ''} ready` : ''}`; setTimeout(() => toast(msg), reduceMotion() ? 0 : 1000); } // wait for the coins to land so the toast doesn't cover the meter
 }
 $('#panel').addEventListener('click', e => {
   const o = e.target.closest('[data-open]'); if (o) { beep(SFX.tap); openNode(o.dataset.open); focusNode(byId[o.dataset.open]); return; }
   const b = e.target.closest('[data-a]'); if (!b || !sel) return; const n = byId[sel], a = b.dataset.a;
+  if (a !== 'done' && a !== 'credit' && a !== 'swing') finishCoinRun();
   if (a === 'unlock') {
     if (S.gold < n.cost) { beep(SFX.nope); shake(); return toast(`Need ${COIN}${n.cost - S.gold} more gold`); }
     S.gold -= n.cost; S.unlocked[n.id] = 1; save(); renderTree(); const [x, y] = fxAt(n); cutFx(x, y); bumpNode(n); beep(SFX.cut); toast('✂ Unlocked! Now do the goal.');
@@ -223,8 +261,8 @@ $('#btn-buffs').onclick = () => {
   const gp = gateProgress();
   drawer(`<h2>BONUSES</h2>
    <h3>GOLD MULTIPLIERS RIGHT NOW</h3><div class="mult">${arcs}</div>
-   <h3>IN-GAME EFFECTS</h3>${fx.length ? fx.map(e => `<div class="buff fx">⚙ ${e.txt}<br><small>from ${byId[e.id].name}</small></div>`).join('') : '<p class="empty">None yet. First Swing adds a weekly slot, and Payments Live multiplies all gold by 1.25.</p>'}
-   <h3>REAL-WORLD BENEFITS (NOT SIMULATED)</h3>${perks.length ? perks.map(n => n.mods.map(m => `<div class="buff perk">📜 ${m}<br><small>from ${n.name}</small></div>`).join('')).join('') : '<p class="empty">The real advantages that cleared chapters give you will show up here.</p>'}
+   <h3>IN-GAME EFFECTS</h3>${fx.length ? fx.map(e => `<div class="buff fx">⚙ ${e.txt}<br><small>from ${byId[e.id].name}</small></div>`).join('') : '<p class="empty">None yet. First Swing gives you an extra weekly slot, and Payments Live makes all gold worth 1.25×.</p>'}
+   <h3>REAL-WORLD BENEFITS (NOT SIMULATED)</h3>${perks.length ? perks.map(n => n.mods.map(m => `<div class="buff perk">📜 ${m}<br><small>from ${n.name}</small></div>`).join('')).join('') : '<p class="empty">The real-life advantages you earn from cleared chapters will show up here.</p>'}
    <h3>LAUNCH ESSENTIALS (${gp.done}/${gp.total})</h3>${list(gp.parts.map(p => `<span class="row" data-open="${p[0]}">${p.some(r => S.done[r]) ? '✔' : '□'} ${p.map(r => byId[r].name).join(' <i>or</i> ')}</span>`))}`);
 };
 $('#btn-week').onclick = () => {
@@ -236,7 +274,7 @@ $('#btn-week').onclick = () => {
    <h3>READY TO UNLOCK</h3>${av.length ? av.map(row).join('') : '<p class="empty">Clear more chapters to open new ones.</p>'}`);
 };
 $('#drawer').addEventListener('click', e => { const t = e.target.closest('[data-open]'); if (t) { openNode(t.dataset.open); focusNode(byId[t.dataset.open]); } });
-$('#btn-reset').onclick = () => { if (confirm('Start over? This clears all your progress.')) { const keep = { sound: S.sound, theme: S.theme }; S = Object.assign(fresh(), keep, { onboarded: true }); shownGold = 0; save(); sel = null; $('#panel').classList.add('hidden'); $('#drawer').classList.add('hidden'); $('#search').value = ''; $('#runway').value = S.runway; renderFilters(); renderTree(); fit(); toast('Fresh field. Good luck!'); } };
+$('#btn-reset').onclick = () => { if (confirm('Start over? This clears all your progress.')) { finishCoinRun(); const keep = { sound: S.sound, theme: S.theme }; S = Object.assign(fresh(), keep, { onboarded: true }); shownGold = 0; save(); sel = null; $('#panel').classList.add('hidden'); $('#drawer').classList.add('hidden'); $('#search').value = ''; $('#runway').value = S.runway; renderFilters(); renderTree(); fit(); toast('Fresh field. Good luck!'); } };
 $('#btn-sound').onclick = () => { S.sound = !S.sound; save(); renderHud(); beep(SFX.coin); };
 $('#btn-theme').onclick = () => { S.theme = S.theme === 'classic' ? 'meadow' : 'classic'; document.body.className = S.theme; save(); renderHud(); setTop(); toast(S.theme === 'classic' ? 'Classic (dark) theme' : 'Meadow (day) theme'); };
 $('#btn-menu').onclick = () => { $('#top').classList.toggle('open'); setTop(); };
@@ -289,15 +327,61 @@ function shake() { vp.classList.remove('shake'); void vp.offsetWidth; vp.classLi
 function bumpNode(n) { const el = nodesEl.querySelector(`[data-id="${n.id}"]`); if (el) { el.classList.add('cutnow'); setTimeout(() => el.classList.remove('cutnow'), 500); } }
 function spawn(cls, x, y, txt) { const b = document.createElement('div'); b.className = cls; b.style.left = x + 'px'; b.style.top = y + 'px'; if (txt) b.innerHTML = txt; layer.appendChild(b); return b; }
 function cutFx(x, y) {
-  for (let i = 0; i < 28; i++) { const b = spawn('blade', x, y); const a = -Math.PI * Math.random(), d = 50 + Math.random() * 90;
+  for (let i = 0, nb = reduceMotion() ? 0 : 28; i < nb; i++) { const b = spawn('blade', x, y); const a = -Math.PI * Math.random(), d = 50 + Math.random() * 90;
     b.animate([{ transform: 'translate(0,0) rotate(0)', opacity: 1 }, { transform: `translate(${Math.cos(a) * d}px,${Math.sin(a) * d}px) rotate(${(Math.random() - .5) * 720}deg)`, opacity: 1, offset: .6 }, { transform: `translate(${Math.cos(a) * d * 1.2}px,${Math.sin(a) * d + 80}px) rotate(${(Math.random() - .5) * 900}deg)`, opacity: 0 }], { duration: 800 + Math.random() * 300, easing: 'cubic-bezier(.2,.8,.4,1)' }).onfinish = () => b.remove(); }
-  const s = spawn('plus', x - 24, y - 24, iconSVG('scythe', 48)); s.animate([{ transform: 'rotate(-80deg) scale(.8)', opacity: 1 }, { transform: 'rotate(60deg) scale(1.3)', opacity: 1, offset: .6 }, { transform: 'rotate(80deg) scale(1.3)', opacity: 0 }], { duration: 480, easing: 'ease-in' }).onfinish = () => s.remove();
+  const s = spawn('plus', x - 24, y - 24, iconSVG('scythe', 48)); if (reduceMotion()) { s.remove(); return; } s.animate([{ transform: 'rotate(-80deg) scale(.8)', opacity: 1 }, { transform: 'rotate(60deg) scale(1.3)', opacity: 1, offset: .6 }, { transform: 'rotate(80deg) scale(1.3)', opacity: 0 }], { duration: 480, easing: 'ease-in' }).onfinish = () => s.remove();
 }
-function coinFx(x, y, amt) {
-  const g = $('#coinpill').getBoundingClientRect(), gx = g.left + 14, gy = g.top + 10;
-  for (let i = 0; i < Math.min(16, 5 + amt / 15); i++) { const c = spawn('coinfx', x, y); const ox = (Math.random() - .5) * 140, oy = -40 - Math.random() * 80;
-    c.animate([{ transform: 'translate(0,0) scale(.4)' }, { transform: `translate(${ox}px,${oy}px) scale(1.15)`, offset: .35 }, { transform: `translate(${gx - x}px,${gy - y}px) scale(.6)`, opacity: .9 }], { duration: 900 + i * 45, easing: 'cubic-bezier(.5,0,.7,1)' }).onfinish = () => c.remove(); }
+// Coins: explode outward (spin, upward bias) -> drag makes them hang -> attraction pulls them into the meter, accelerating.
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const COINSVG = '<svg viewBox="0 0 8 8" shape-rendering="crispEdges"><path fill="#000" d="M2 0h4v1h1v1h1v4h-1v1h-1v1h-4v-1h-1v-1h-1v-4h1v-1h1z"/><path fill="#c48a00" d="M2 1h4v1h1v4h-1v1h-4v-1h-1v-4h1z"/><path fill="#ffd23a" d="M2 1h3v1h1v3h-1v1h-3v-1h-1v-3h1z"/><path fill="#fff3a0" d="M2 2h1v2h-1z"/><path fill="#c48a00" d="M4 2h1v3h-1z"/></svg>';
+function finishCoinRun() { if (!coinRun) return; shownGold = coinRun.to; coinRun = null; $('#gold').textContent = S.gold; }
+function coinTarget() { const g = $('#coinpill').getBoundingClientRect(), c = $('#coinpill .pc').getBoundingClientRect(); return [c.width ? c.left + c.width / 2 : g.left + 20, (c.height ? c.top + c.height / 2 : g.top + g.height / 2)]; }
+function coinLand(run) {
+  if (run !== coinRun) return; run.landed++;
+  const v = run.landed >= run.n ? run.to : Math.round(run.from + (run.to - run.from) * run.landed / run.n);
+  $('#gold').textContent = v;
+  const pill = $('#coinpill'); pill.classList.remove('hit'); void pill.offsetWidth; pill.classList.add('hit');
+  clinkSfx();
+  if (run.landed >= run.n) { shownGold = run.to; coinRun = null; pill.classList.remove('pop'); void pill.offsetWidth; pill.classList.add('pop'); renderHud(); }
+}
+function coinFx(x, y, amt, big) {
+  const run = coinRun || { from: S.gold - amt, to: S.gold, n: 0, landed: 0 }; coinRun = run;
+  const N = reduceMotion() ? 5 : Math.round(Math.min(big ? 20 : 14, (big ? 12 : 8) + amt / 25));
+  run.n = N; clinkSfx(true); burstSfx(big);
   const p = spawn('plus', x - 30, y - 50, `+${amt}`); p.animate([{ transform: 'translateY(0) scale(.6)', opacity: 1 }, { transform: 'translateY(-50px) scale(1.5)', opacity: 1, offset: .5 }, { transform: 'translateY(-80px) scale(1.2)', opacity: 0 }], { duration: 1100 }).onfinish = () => p.remove();
+  setTimeout(() => { if (coinRun === run) { finishCoinRun(); renderHud(); } }, 4000); // safety net (e.g. tab hidden, rAF paused)
+  if (reduceMotion()) { // simple version: no explosion, coins glide straight to the meter
+    const [gx, gy] = coinTarget();
+    for (let i = 0; i < N; i++) { const c = spawn('coinfx', x - 9, y - 9, COINSVG);
+      c.animate([{ transform: 'translate(0,0)', opacity: 0 }, { opacity: 1, offset: .2 }, { transform: `translate(${gx - x}px,${gy - y}px)`, opacity: 1 }], { duration: 520, delay: i * 90, easing: 'ease-in', fill: 'backwards' }).onfinish = () => { c.remove(); coinLand(run); }; }
+    return;
+  }
+  const coins = [];
+  for (let i = 0; i < N; i++) {
+    const a = -Math.PI / 2 + (Math.random() - .5) * Math.PI * 1.7, sp = (big ? 700 : 540) + Math.random() * (big ? 600 : 420); // mostly upward, any direction
+    const el = spawn('coinfx', 0, 0, COINSVG);
+    coins.push({ el, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 120, spin: Math.random() * 6, sv: (Math.random() < .5 ? -1 : 1) * (10 + Math.random() * 10), sc: .7 + Math.random() * .5, hold: .42 + i * .035 + Math.random() * .08, t: 0, done: false });
+  }
+  let last = performance.now();
+  const step = now => {
+    const dt = Math.min(.033, (now - last) / 1000); last = now; const [gx, gy] = coinTarget(); let alive = 0;
+    for (const c of coins) { if (c.done) continue; alive++; c.t += dt;
+      if (c.t < c.hold) { // burst + drag: fast out, then decelerate and hang in the air with a little float down
+        const k = Math.exp(-5.8 * dt); c.vx *= k; c.vy = c.vy * k + 260 * dt;
+      } else { // homing: attraction grows over time; steer velocity toward the meter so coins don't orbit
+        const dx = gx - c.x, dy = gy - c.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d, ht = c.t - c.hold;
+        const A = 2600 + 16000 * ht * ht; c.vx += ux * A * dt; c.vy += uy * A * dt;
+        const spd = Math.hypot(c.vx, c.vy), st = Math.min(1, 7 * dt); c.vx += (ux * spd - c.vx) * st; c.vy += (uy * spd - c.vy) * st;
+        if (d < 18 || (c.vx * dx + c.vy * dy < 0 && d < 60) || ht > 1.6) { c.done = true; c.el.remove(); coinLand(run); continue; }
+        c.sc = Math.max(.55, c.sc - dt * .5);
+      }
+      c.x += c.vx * dt; c.y += c.vy * dt; c.spin += c.sv * dt;
+      c.el.style.transform = `translate3d(${(c.x - 10).toFixed(1)}px,${(c.y - 10).toFixed(1)}px,0) scale(${(Math.cos(c.spin) * c.sc).toFixed(3)},${c.sc.toFixed(3)})`;
+    }
+    if (alive) requestAnimationFrame(step);
+  };
+  coins.forEach(c => c.el.style.transform = `translate3d(${x - 9}px,${y - 9}px,0) scale(.3)`);
+  requestAnimationFrame(step);
 }
 function ringFx(x, y) { const r = spawn('ring', x, y); r.animate([{ transform: 'rotate(45deg) scale(.5)', opacity: 1 }, { transform: 'rotate(45deg) scale(4)', opacity: 0 }], { duration: 650, easing: 'ease-out' }).onfinish = () => r.remove(); }
 function modal(html) { const m = $('#modal'); m.innerHTML = `<div class="card">${html}</div>`; m.classList.remove('hidden'); }
@@ -321,9 +405,9 @@ function stage(i) {
   return `<div class="stage s3"><svg viewBox="0 0 300 190"><path class="grow" d="M150,140 C120,110 90,100 70,60" fill="none" stroke="#101410" stroke-width="11"/><path class="grow" d="M150,140 C120,110 90,100 70,60" fill="none" stroke="#6fae45" stroke-width="6"/><path class="grow b" d="M150,140 C180,110 210,100 230,60" fill="none" stroke="#101410" stroke-width="11"/><path class="grow b" d="M150,140 C180,110 210,100 230,60" fill="none" stroke="#6fae45" stroke-width="6"/>${D(150, 145, 40, '#b6f070', '#ffd23a')}${ic('magnifier', 150, 145, 22)}<g class="newn a" style="transform-origin:70px 55px">${D(70, 55, 40, '#5f9a3a', '#ffd23a')}${ic('speech', 70, 55, 22)}</g><g class="newn b" style="transform-origin:230px 55px">${D(230, 55, 40, '#5f9a3a', '#ffd23a')}${ic('barchart', 230, 55, 22)}</g></svg></div>`;
 }
 const INTRO = [
-  ['CUT THE GRASS', 'Every tile is a chapter of the playbook. Unlock one to cut it free.'],
-  ['DO IT, GET GOLD', 'Do the real-world goal, then tap <b>I DID IT</b>. Gold only comes from doing.'],
-  ['NEW VINES GROW', 'Clearing chapters opens new ones. Gold borders mean you can unlock it. Follow <b>▶ NEXT</b>.'],
+  ['CUT THE GRASS', 'Each tile is a chapter of the playbook. Spend gold to unlock one and cut the grass away.'],
+  ['DO IT, GET GOLD', 'Do the chapter\'s real-world goal, then tap <b>I DID IT</b>. You earn gold by doing the work, not by reading.'],
+  ['NEW VINES GROW', 'Each chapter you clear opens new ones. A gold border means you can unlock it now. Not sure where to go? Tap <b>▶ NEXT</b>.'],
 ];
 function intro(i) {
   clearTimeout(intro._t);
@@ -337,5 +421,5 @@ function intro(i) {
 $('.title').innerHTML = iconSVG('scythe', 26) + '<span>OVERGROWTH<small>the solo founder skill tree</small></span>';
 setTop(); renderFilters(); renderTree(); home();
 if (!S.onboarded) intro(0);
-window.__og = { get state() { return S; }, status: id => status(byId[id]), open: id => { openNode(id); focusNode(byId[id]); } };
+window.__og = { get audio() { return ac ? ac.state : 'none'; }, get coinRun() { return coinRun; }, get state() { return S; }, status: id => status(byId[id]), open: id => { openNode(id); focusNode(byId[id]); } };
 })();
