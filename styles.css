@@ -228,7 +228,7 @@ body.classic .sheet h3{color:var(--gold)}
 }
 .ci{display:inline-block;width:.8em;height:.8em;border-radius:50%;vertical-align:-.08em;margin:0 .15em;background:radial-gradient(circle at 35% 35%,#fff3a0 0 20%,#ffd23a 21% 60%,#c48a00 61%);border:2px solid #000;font-style:normal}
 .cost .ci{width:8px;height:8px;border-width:1px;margin:0 2px 0 0}
-@media (max-width:760px){#toast{top:calc(var(--toph,110px) - 34px)}}
+@media (max-width:760px){#toast{top:calc(var(--toph,110px) - 34px)}#toast.low{top:auto;bottom:calc(env(safe-area-inset-bottom,0px) + 92px)}}
 
 /* ---------- pixel cursors (32px + 2x; hotspot = arrow tip / fingertip / palm) ---------- */
 html,body{cursor:url(cursors/arrow.png) 1 1,auto;cursor:-webkit-image-set(url(cursors/arrow.png) 1x,url(cursors/arrow@2x.png) 2x) 1 1,auto;cursor:image-set(url(cursors/arrow.png) 1x,url(cursors/arrow@2x.png) 2x) 1 1,auto}

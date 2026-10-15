@@ -67,7 +67,7 @@ function nextBest() {
 // Samples in audio/ were generated with ElevenLabs (sound effects + music) and tuned to C major.
 // If a file fails to load or decode, the old procedural 8-bit sounds play instead.
 let ac = null, noiseBuf = null, sfxBus = null, musicBus = null, duckG = null, musicSrc = null, bufsLoading = false;
-const BUF = {}, AUD_V = '4.1', MUSIC_LOOP = { start: .3, len: 47.99274 }, MUSIC_VOL = .32;
+const BUF = {}, AUD_V = '4.4', MUSIC_LOOP = { start: .3, len: 47.99274 }, MUSIC_VOL = .32;
 const canOgg = (() => { try { return !!document.createElement('audio').canPlayType('audio/ogg; codecs="vorbis"'); } catch (e) { return false; } })();
 window.__sndlog = [];
 function ctx() {
@@ -127,18 +127,18 @@ const SFX = { cut: [[220, .05, 'sawtooth'], [440, .06], [660, .08]], coin: [[988
 const SAMPLE = new Map([[SFX.tap, ['click', .35]], [SFX.cut, ['swoosh', .7]], [SFX.boss, ['fanfare', .5]], [SFX.nope, ['error', .4]], [SFX.coin, ['coin', .35]]]);
 function beep(seq) { if (!S.sound) return; const sm = SAMPLE.get(seq); if (sm && play(sm[0], sm[1])) return; let at = 0; for (const [f, d, type] of seq) { tone(f, d, type || 'square', .06, at); at += d * .8; } }
 function burstSfx(big) { duck(); if (play('spill', big ? .9 : .75)) return; noise(big ? .28 : .16, big ? .16 : .11); tone(big ? 520 : 680, big ? .2 : .12, 'square', .07, 0, 90); if (big) tone(260, .25, 'triangle', .08, .02, 60); }
-// coin landing: a short C note that climbs the C-major pentatonic per coin (C6 up to C7); rate-limited so a swarm doesn't get noisy
+// coin landing: a short clink per coin, pitch nudged upward; rate-limited so a swarm doesn't get noisy
 const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31];
 let lastClink = 0, clinkStep = 0;
 function clinkSfx(reset) {
   if (reset) { clinkStep = 0; return; }
   const now = performance.now(), slot = Math.max(now, lastClink + 48); if (slot - now > 260) return; lastClink = slot; // queue into 48ms slots; drop only if far behind
   const st = PENTA[Math.min(clinkStep++, 5)], at = (slot - now) / 1000;
-  if (play('coin', .26, .5 * Math.pow(2, st / 12), at)) return;
+  if (play('coin', .34, Math.pow(2, st / 48), at)) return; // real coin clink into the counter, nudged up a little per coin (max +3 semitones)
   const f = 1046.5 * Math.pow(2, PENTA[Math.min(clinkStep - 1, PENTA.length - 1)] / 12);
   tone(f, .05, 'square', .045, at); tone(f * 1.5, .09, 'square', .03, at + .035);
 }
-function kachingSfx() { if (!play('kaching', .4, 1, .04)) { tone(1046.5, .08, 'square', .05, .04); tone(1568, .18, 'square', .04, .1); } }
+function kachingSfx() { if (!play('kaching', .62, 1, .03)) { tone(1046.5, .08, 'square', .05, .04); tone(1568, .18, 'square', .04, .1); } }
 
 // ---------- tree ----------
 const vp = $('#viewport'), world = $('#world'), nodesEl = $('#nodes'), svg = $('#vines');
@@ -272,11 +272,13 @@ function clear(n, credited) {
   const fresh = SKILLS.filter(k => status(k) === 'avail' && !before.has(k.id));
   fresh.forEach((k, i) => setTimeout(() => { const [a, b] = fxAt(k); ringFx(a, b); }, 350 + i * 90));
   if (n.tier === 'root') { shake(); beep(SFX.boss); setTimeout(() => bossModal(n, rw, fresh), 450); }
-  else { const msg = `+${COIN}${rw}${fresh.length ? ` · ${fresh.length} new chapter${fresh.length > 1 ? 's' : ''} ready` : ''}`; setTimeout(() => toast(msg), reduceMotion() ? 0 : 1000); } // wait for the coins to land so the toast doesn't cover the meter
+  else { coinRun.msg = `+${COIN}${rw}${fresh.length ? ` · ${fresh.length} new chapter${fresh.length > 1 ? 's' : ''} ready` : ''}`; } // shown once the last coin lands, so the toast never covers the meter mid-flight
 }
 $('#panel').addEventListener('click', e => {
   const o = e.target.closest('[data-open]'); if (o) { beep(SFX.tap); openNode(o.dataset.open); focusNode(byId[o.dataset.open]); return; }
   const b = e.target.closest('[data-a]'); if (!b || !sel) return; const n = byId[sel], a = b.dataset.a;
+  // phone: the sheet covers most of the screen, so close it and bring the tile to the middle before the coins burst
+  if (isMobile() && (a === 'done' || (a === 'credit' && !forkedAway(n)))) { $('#panel').classList.add('hidden'); sel = null; focusNode(n); setTimeout(() => clear(n, a === 'credit'), reduceMotion() ? 0 : 380); return; }
   if (a !== 'done' && a !== 'credit' && a !== 'swing') finishCoinRun();
   if (a === 'unlock') {
     if (S.gold < n.cost) { beep(SFX.nope); shake(); return toast(`Need ${COIN}${n.cost - S.gold} more gold`); }
@@ -363,7 +365,7 @@ window.addEventListener('resize', setTop); if (window.ResizeObserver) new Resize
 
 // ---------- juice ----------
 const layer = $('#fxlayer');
-function toast(t) { const el = $('#toast'); el.innerHTML = t; el.style.left = !isMobile() && !$('#panel').classList.contains('hidden') ? Math.max(200, (innerWidth - 540) / 2) + 'px' : ''; el.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('show'), 2200); }
+function toast(t) { const el = $('#toast'); el.innerHTML = t; el.classList.toggle('low', isMobile() && $('#panel').classList.contains('hidden')); el.style.left = !isMobile() && !$('#panel').classList.contains('hidden') ? Math.max(200, (innerWidth - 540) / 2) + 'px' : ''; el.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('show'), 2200); }
 function shake() { vp.classList.remove('shake'); void vp.offsetWidth; vp.classList.add('shake'); if (navigator.vibrate) try { navigator.vibrate(30); } catch (e) {} }
 function bumpNode(n) { const el = nodesEl.querySelector(`[data-id="${n.id}"]`); if (el) { el.classList.add('cutnow'); setTimeout(() => el.classList.remove('cutnow'), 500); } }
 function spawn(cls, x, y, txt) { const b = document.createElement('div'); b.className = cls; b.style.left = x + 'px'; b.style.top = y + 'px'; if (txt) b.innerHTML = txt; layer.appendChild(b); return b; }
@@ -375,7 +377,7 @@ function cutFx(x, y) {
 // Coins: explode outward (spin, upward bias) -> drag makes them hang -> attraction pulls them into the meter, accelerating.
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const COINSVG = '<svg viewBox="0 0 8 8" shape-rendering="crispEdges"><path fill="#000" d="M2 0h4v1h1v1h1v4h-1v1h-1v1h-4v-1h-1v-1h-1v-4h1v-1h1z"/><path fill="#c48a00" d="M2 1h4v1h1v4h-1v1h-4v-1h-1v-4h1z"/><path fill="#ffd23a" d="M2 1h3v1h1v3h-1v1h-3v-1h-1v-3h1z"/><path fill="#fff3a0" d="M2 2h1v2h-1z"/><path fill="#c48a00" d="M4 2h1v3h-1z"/></svg>';
-function finishCoinRun() { if (!coinRun) return; shownGold = coinRun.to; coinRun = null; $('#gold').textContent = S.gold; }
+function finishCoinRun() { if (!coinRun) return; if (coinRun.msg) toast(coinRun.msg); shownGold = coinRun.to; coinRun = null; $('#gold').textContent = S.gold; }
 function coinTarget() { const g = $('#coinpill').getBoundingClientRect(), c = $('#coinpill .pc').getBoundingClientRect(); return [c.width ? c.left + c.width / 2 : g.left + 20, (c.height ? c.top + c.height / 2 : g.top + g.height / 2)]; }
 function coinLand(run) {
   if (run !== coinRun) return; run.landed++;
@@ -383,7 +385,7 @@ function coinLand(run) {
   $('#gold').textContent = v;
   const pill = $('#coinpill'); pill.classList.remove('hit'); void pill.offsetWidth; pill.classList.add('hit');
   clinkSfx();
-  if (run.landed >= run.n) { kachingSfx(); shownGold = run.to; coinRun = null; pill.classList.remove('pop'); void pill.offsetWidth; pill.classList.add('pop'); renderHud(); }
+  if (run.landed >= run.n) { kachingSfx(); if (run.msg) setTimeout(() => toast(run.msg), 250); shownGold = run.to; coinRun = null; pill.classList.remove('pop'); void pill.offsetWidth; pill.classList.add('pop'); renderHud(); }
 }
 function coinFx(x, y, amt, big) {
   const run = coinRun || { from: S.gold - amt, to: S.gold, n: 0, landed: 0 }; coinRun = run;
