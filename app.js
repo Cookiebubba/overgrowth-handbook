@@ -56,7 +56,7 @@ function nextBest() {
   const ord = (a, b) => (LAYOUT.depth?.[a.id] || 0) - (LAYOUT.depth?.[b.id] || 0) || a.cost - b.cost;
   const open = SKILLS.filter(n => status(n) === 'unlocked').sort(ord);
   if (open.length) return { n: open[0], verb: 'FINISH' };
-  const av = SKILLS.filter(n => status(n) === 'avail').sort((a, b) => (b.tier === 'root') - (a.tier === 'root') || (S.gold >= b.cost) - (S.gold >= a.cost) || ord(a, b));
+  const av = SKILLS.filter(n => status(n) === 'avail').sort((a, b) => (b.tier === 'root') - (a.tier === 'root') || (S.gold >= b.cost) - (S.gold >= a.cost) || (!!a.excl) - (!!b.excl) || ord(a, b));
   return av.length ? { n: av[0], verb: S.gold >= av[0].cost ? 'UNLOCK' : 'SAVE UP FOR' } : null;
 }
 (function harvest() { const days = Math.min(7, Math.floor((Date.parse(today()) - Date.parse(S.harvest || today())) / 864e5)); const per = activeFx().reduce((a, e) => a + (e.daily || 0), 0); if (days > 0 && per) { S.gold += days * per; setTimeout(() => toast(`Evergreen content paid out: +${COIN}${days * per}`), 900); } S.harvest = today(); save(); })();
