@@ -1,4 +1,6 @@
 # OVERGROWTH: Solo Founder Skill Tree
+
+<a href="https://buymeacoffee.com/brandynships"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="41"></a>
 A GrassChopper-inspired 8-bit skill-tree handbook for solo founders. There are 58 playbook chapters on a thorny vine tree. You cut each chapter free, do the real-world goal, and earn gold.
 
 Live: https://cookiebubba.github.io/overgrowth-handbook/
